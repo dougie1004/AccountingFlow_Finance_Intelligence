@@ -1,0 +1,181 @@
+﻿warning: unused import: `std::time::Duration`
+ --> src\ai\ai_service.rs:5:5
+  |
+5 | use std::time::Duration;
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+
+warning: unused import: `Xlsx`
+ --> src\ai\excel_parser.rs:2:24
+  |
+2 | use calamine::{Reader, Xlsx, Data};
+  |                        ^^^^
+
+
+warning: unused imports: `AiOutputCard`, `ReviewRunLog`, and `ScanSummary`
+ --> src\ai\review_engine.rs:1:21
+  |
+1 | use crate::models::{ReviewRunLog, ScanSummary, AiOutputCard};
+  |                     ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^
+
+
+warning: unused imports: `Account`, `ManagementIssue`, `ManagementScenario`, `ReviewAnalysisResult`, and `ReviewFinding`
+ --> src\commands.rs:4:21
+  |
+4 | use crate::models::{Account, ManagementProject, ReviewAnalysisResult, ReviewFinding, ManagementIssue, ManagementScenario};
+  |                     ^^^^^^^                     ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^
+
+
+warning: unused import: `crate::ai::csv_inference`
+ --> src\commands.rs:7:5
+  |
+7 | use crate::ai::csv_inference;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: variant `NON_OPERATING` should have an upper camel case name
+  --> src\models.rs:13:5
+   |
+13 |     NON_OPERATING,
+   |     ^^^^^^^^^^^^^ help: convert the identifier to upper camel case: `NonOperating`
+   |
+   = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+
+error[E0308]: mismatched types
+  --> src\accounting\batch_processor.rs:11:5
+   |
+ 8 | pub async fn process_csv_batch(csv_data: String) -> Result<Vec<ParsedTransaction>, String> {
+   |                                                     -------------------------------------- expected `Result<Vec<ParsedTransaction>, std::string::String>` because of return type
+...
+11 |     parse_robust_csv(bytes, None)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<Vec<ParsedTransaction>, String>`, found `Result<Vec<ParsedTransaction>, ...>`
+   |
+   = note: expected enum `Result<_, std::string::String>`
+              found enum `Result<_, SystemError>`
+
+
+warning: variable does not need to be mutable
+   --> src\ai\review_engine.rs:116:9
+    |
+116 |     let mut response_json: Value = serde_json::from_str(&ai_response).map_err(|e| format!("AI Response Parse Error: {}", e))?;
+    |         ----^^^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+
+error[E0277]: `?` couldn't convert the error to `std::string::String`
+  --> src\utils\converter.rs:34:73
+   |
+24 | pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String> {
+   |                                                      --------------------------- expected `std::string::String` because of this
+...
+34 |         let decoded = crate::ai::robust_parser::detect_and_decode(bytes)?;
+   |                       --------------------------------------------------^ the trait `From<SystemError>` is not implemented for `std::string::String`
+   |                       |
+   |                       this can't be annotated with `?` because it has type `Result<_, SystemError>`
+   |
+note: `SystemError` needs to implement `Into<std::string::String>`
+  --> src\core\models.rs:14:1
+   |
+14 | pub enum SystemError {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+   = help: the following other types implement trait `From<T>`:
+             `std::string::String` implements `From<&mut str>`
+             `std::string::String` implements `From<&std::string::String>`
+             `std::string::String` implements `From<&str>`
+             `std::string::String` implements `From<AssetKey>`
+             `std::string::String` implements `From<Box<str>>`
+             `std::string::String` implements `From<Cow<'_, str>>`
+             `std::string::String` implements `From<Uuid>`
+             `std::string::String` implements `From<char>`
+           and 8 others
+
+
+error[E0277]: `?` couldn't convert the error to `std::string::String`
+  --> src\utils\converter.rs:61:69
+   |
+48 | ) -> Result<Vec<ParsedTransaction>, String> {
+   |      -------------------------------------- expected `std::string::String` because of this
+...
+61 |     let decoded = crate::ai::robust_parser::detect_and_decode(bytes)?;
+   |                   --------------------------------------------------^ the trait `From<SystemError>` is not implemented for `std::string::String`
+   |                   |
+   |                   this can't be annotated with `?` because it has type `Result<_, SystemError>`
+   |
+note: `SystemError` needs to implement `Into<std::string::String>`
+  --> src\core\models.rs:14:1
+   |
+14 | pub enum SystemError {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+   = help: the following other types implement trait `From<T>`:
+             `std::string::String` implements `From<&mut str>`
+             `std::string::String` implements `From<&std::string::String>`
+             `std::string::String` implements `From<&str>`
+             `std::string::String` implements `From<AssetKey>`
+             `std::string::String` implements `From<Box<str>>`
+             `std::string::String` implements `From<Cow<'_, str>>`
+             `std::string::String` implements `From<Uuid>`
+             `std::string::String` implements `From<char>`
+           and 8 others
+
+
+warning: unused variable: `period_start`
+   --> src\accounting\report_engine.rs:105:5
+    |
+105 |     period_start: String,
+    |     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_period_start`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+
+warning: unused variable: `net_assets`
+   --> src\accounting\report_engine.rs:156:9
+    |
+156 |     let net_assets: f64 = financial_overview.total_revenue - financial_overview.total_expenses; // Simplified
+    |         ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_net_assets`
+
+
+warning: variable `base_count` is assigned to, but never used
+  --> src\accounting\flow_analysis.rs:50:9
+   |
+50 |     let mut base_count = 0;
+   |         ^^^^^^^^^^^^^^
+   |
+   = note: consider using `_base_count` instead
+
+
+warning: value assigned to `base_count` is never read
+  --> src\accounting\flow_analysis.rs:58:13
+   |
+58 |             base_count += 1;
+   |             ^^^^^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+
+warning: unused variable: `source`
+   --> src\ai\ai_service.rs:246:19
+    |
+246 |     let (api_key, source) = match custom_api_key {
+    |                   ^^^^^^ help: if this is intentional, prefix it with an underscore: `_source`
+
+
+warning: unused variable: `project_type`
+   --> src\commands.rs:307:37
+    |
+307 | pub async fn analyze_process_mining(project_type: String) -> Result<MiningResult, String> {
+    |                                     ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_project_type`
+
+
+Some errors have detailed explanations: E0277, E0308.
+
+For more information about an error, try `rustc --explain E0277`.
+

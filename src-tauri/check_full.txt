@@ -1,0 +1,88 @@
+﻿cargo :     Checking accounting-f
+low v0.1.0 (C:\Projects\Accountin
+gFlow\src-tauri)
+위치 줄:1 문자:1
++ cargo check --message-format=sh
+ort 2>&1 | select -first 100 | Ou
+t-Fil ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo          : No 
+   tSpecified: (    Checking ac  
+  ...Flow\src-tauri):String) [   
+ ], RemoteException
+    + FullyQualifiedErrorId : Na 
+   tiveCommandError
+ 
+src\core\security.rs:7:1: warning
+: unused doc comment: rustdoc doe
+s not generate documentation for 
+macro invocations
+src\ai\ai_service.rs:5:5: warning
+: unused import: `std::time::Dura
+tion`
+src\ai\excel_parser.rs:2:24: warn
+ing: unused import: `Xlsx`
+src\ai\review_engine.rs:1:21: war
+ning: unused imports: `AiOutputCa
+rd`, `ReviewRunLog`, and `ScanSum
+mary`
+src\commands.rs:4:21: warning: un
+used imports: `Account`, `Managem
+entIssue`, `ManagementScenario`, 
+`ReviewAnalysisResult`, and `Revi
+ewFinding`
+src\commands.rs:7:5: warning: unu
+sed import: `crate::ai::csv_infer
+ence`
+src\models.rs:13:5: warning: vari
+ant `NON_OPERATING` should have a
+n upper camel case name: help: co
+nvert the identifier to upper cam
+el case: `NonOperating`
+src\accounting\batch_processor.rs
+:11:5: error[E0308]: mismatched t
+ypes: expected `Result<Vec<Parsed
+Transaction>, String>`, found `Re
+sult<Vec<ParsedTransaction>, ...>
+`
+src\ai\universal_ingestor.rs:32:1
+26: error[E0277]: `ExcelError` do
+esn't implement `Debug`: `ExcelEr
+ror` cannot be formatted using `{
+:?}` because it doesn't implement
+ `Debug`
+src\ai\review_engine.rs:116:9: wa
+rning: variable does not need to 
+be mutable
+src\accounting\report_engine.rs:1
+05:5: warning: unused variable: `
+period_start`: help: if this is i
+ntentional, prefix it with an und
+erscore: `_period_start`
+src\accounting\report_engine.rs:1
+56:9: warning: unused variable: `
+net_assets`: help: if this is int
+entional, prefix it with an under
+score: `_net_assets`
+src\accounting\flow_analysis.rs:5
+0:9: warning: variable `base_coun
+t` is assigned to, but never used
+src\accounting\flow_analysis.rs:5
+8:13: warning: value assigned to 
+`base_count` is never read
+src\ai\ai_service.rs:246:19: warn
+ing: unused variable: `source`: h
+elp: if this is intentional, pref
+ix it with an underscore: `_sourc
+e`
+src\commands.rs:307:37: warning: 
+unused variable: `project_type`: 
+help: if this is intentional, pre
+fix it with an underscore: `_proj
+ect_type`
+warning: `accounting-flow` (lib) 
+generated 14 warnings
+error: could not compile `account
+ing-flow` (lib) due to 2 previous
+ errors; 14 warnings emitted
