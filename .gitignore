@@ -37,6 +37,11 @@ ai_service_original.txt
 *.py
 test_gemini.py
 
+# Private / sensitive documents
+docs/*PRIVATE*
+docs/*private*
+*.PRIVATE.*
+
 # Evidence images (temporary)
 KakaoTalk_*.jpg
 20260109_*.jpg
