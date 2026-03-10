@@ -6,6 +6,22 @@
 export type EntryType = 'Expense' | 'Asset' | 'Revenue' | 'Liability' | 'Equity' | 'Payroll';
 export type PartnerType = 'Vendor' | 'Customer' | 'Employee';
 
+export type LedgerScope = 'Actual' | 'Forecast' | 'Scenario';
+
+export interface ScenarioAssumption {
+    key: string;         // e.g., "revenue_multiplier", "fixed_cost_delta"
+    value: number;
+    description: string;
+}
+
+export interface ScenarioDefinition {
+    id: string;
+    name: string;
+    baseSnapshotId: string;
+    assumptions: ScenarioAssumption[];
+    createdAt: string;
+}
+
 export interface JournalEntry {
     id: string;
     date: string; // ISO 8601
@@ -18,6 +34,8 @@ export interface JournalEntry {
     type: EntryType;
     status: 'Approved' | 'Unconfirmed' | 'Hold' | 'Pending Review';
     taxCode?: TaxCode;
+    scope?: LedgerScope;
+    scenarioId?: string;
 
     // [Integrity Engine V2] 
     postedBy?: string;      // UserID who performed the 'POST' action
@@ -271,6 +289,8 @@ export interface ParsedTransaction {
     residualValue?: number;
     leaseAssetType?: 'Vehicle' | 'Machinery';
     payrollSplit?: { pension: number; health: number; tax: number; net: number };
+    scope?: LedgerScope;
+    scenarioId?: string;
 }
 
 export interface ComplianceReview {

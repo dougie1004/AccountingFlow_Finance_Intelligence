@@ -1,6 +1,6 @@
 // Modular Architecture
 pub mod core;
-pub mod accounting;
+pub mod engine;
 pub mod scm;
 pub mod tax;
 pub mod ai;
@@ -61,7 +61,8 @@ pub fn run() {
             commands::get_compliance_mappings,
             commands::get_ir_financial_summary,
             commands::generate_tax_pro_pack,
-            commands::parse_universal_file
+            commands::parse_universal_file,
+            commands::run_strategic_scenario
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

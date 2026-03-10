@@ -46,7 +46,7 @@ pub fn analyze_csv(data: Vec<u8>) -> Result<InferenceResult, String> {
 
     // Heuristics
     let header_line = lines[0].to_lowercase();
-    let header_tokens: Vec<&str> = header_line.split(|c| c == ',' || c == '\t' || c == ';').collect();
+    let _header_tokens: Vec<&str> = header_line.split(|c| c == ',' || c == '\t' || c == ';').collect();
     
     let is_payroll = header_line.contains("급여") || header_line.contains("사원") || header_line.contains("지급") || header_line.contains("salary") || header_line.contains("employee");
     let is_insurance = header_line.contains("고지서") || header_line.contains("보험") || header_line.contains("연금") || header_line.contains("insurance") || header_line.contains("pension");

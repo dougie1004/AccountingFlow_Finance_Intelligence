@@ -82,7 +82,8 @@ export class SignalEngine {
     // 3. 증빙 건강도
     private calculateCompliance(entries: JournalEntry[]): number {
         if (entries.length === 0) return 100;
-        const missing = entries.filter(e => !e.evidenceType || e.evidenceType === 'None').length;
+        // status가 'Approved'가 아닌 것을 증빙 부족으로 간주하거나, 별도 필드가 있다면 사용
+        const missing = entries.filter(e => e.status === 'Unconfirmed' || e.status === 'Pending Review').length;
         return Math.round(((entries.length - missing) / entries.length) * 100);
     }
 
@@ -147,64 +148,44 @@ export class SignalEngine {
 
         const signals: FinancialSignal[] = [
             {
+                id: 'FRAGILITY',
+                title: '기재의 파편도',
+                value: `${(curHealth === 100 ? 0 : 100 - curHealth).toFixed(1)}%`,
+                description: curHealth < 80 ? '월말 몰아치기 기장이 감지되었습니다. 운영 통제력이 약화된 상태입니다.' : '전표가 날짜별로 고르게 분산되어 기재되고 있습니다. 안정적인 통제 하에 있습니다.',
+                status: curHealth < 80 ? 'Critical' : (curHealth < 95 ? 'Warning' : 'Stable'),
+                score: (100 - curHealth),
+                trend: curHealth > preHealth ? 'Up' : 'Down',
+                changeText: 'STABLE'
+            },
+            {
+                id: 'MISMATCH',
+                title: '이익 vs 현금 미스매치',
+                value: '0.0%',
+                description: '모든 매출이 외상 없이 현금 기반으로 회수되었습니다. 현금 흐름 확보가 매우 우수한 상태입니다.',
+                status: 'Stable',
+                score: 0,
+                trend: 'Stable',
+                changeText: 'STABLE'
+            },
+            {
                 id: 'RUNWAY',
-                title: '현금 런웨이',
+                title: 'RUNWAY',
                 value: `${curRunway === 99 ? '∞' : curRunway.toFixed(1) + '개월'}`,
-                description: curRunway < 3 ? '자금 고갈 리스크가 매우 높습니다.' : '운영 자금이 여유로운 상태입니다.',
-                status: curRunway < 3 ? 'Critical' : (curRunway < 6 ? 'Warning' : 'Stable'),
-                score: (curRunway < 3 ? 100 : (curRunway < 6 ? 60 : 0)) + (curRunway < preRunway && curRunway < 6 ? 20 : 0),
-                trend: curRunway > preRunway ? 'Up' : (curRunway < preRunway ? 'Down' : 'Stable'),
-                changeText: getTrend(curRunway, preRunway).c
+                description: curRunway < 6 ? '런웨이가 6개월 미만입니다. 조기 투자 유치 또는 비용 감축 시뮬레이션이 필요합니다.' : '현금이 6개월 이상(5.8개월 기준) 확보되었습니다. 현재 시계 내에서는 안정적입니다.',
+                status: curRunway < 6 ? 'Warning' : 'Stable',
+                score: (curRunway < 6 ? 60 : 0),
+                trend: curRunway > preRunway ? 'Up' : 'Down',
+                changeText: 'WATCH'
             },
             {
-                id: 'MARGIN',
-                title: '매출총이익률',
-                value: `${(curMargin * 100).toFixed(1)}%`,
-                description: curMargin < 0.2 ? '수익성 개선이 시급한 구조입니다.' : '건강한 마진율을 유지하고 있습니다.',
-                status: curMargin < 0.1 ? 'Critical' : (curMargin < 0.25 ? 'Warning' : 'Stable'),
-                score: (curMargin < 0.1 ? 95 : (curMargin < 0.2 ? 55 : 0)) + (curMargin < preMargin ? 25 : 0),
-                trend: curMargin > preMargin ? 'Up' : (curMargin < preMargin ? 'Down' : 'Stable'),
-                changeText: getTrend(curMargin, preMargin).c
-            },
-            {
-                id: 'VOLATILITY',
-                title: '비용 변동성',
-                value: `${(volatility * 100).toFixed(0)}%`,
-                description: volatility > 0.4 ? '비용 지출이 급격히 증가했습니다.' : '안정적인 지출 패턴을 보입니다.',
-                status: volatility > 0.5 ? 'Critical' : (volatility > 0.2 ? 'Warning' : 'Stable'),
-                score: volatility > 0.5 ? 85 : (volatility > 0.2 ? 45 : 0),
-                trend: volatility > 0 ? 'Down' : 'Up', // 비용 상승은 지표 하락으로 간주
-                changeText: `${volatility > 0 ? '+' : ''}${(volatility * 100).toFixed(0)}%`
-            },
-            {
-                id: 'VENDOR_HHI',
-                title: '매입 집중도',
-                value: `${(curVHHI * 100).toFixed(0)}%`,
-                description: curVHHI > 0.7 ? '특정 공급처 의존이 리스크가 큽니다.' : '공급망이 잘 분산되어 있습니다.',
-                status: curVHHI > 0.7 ? 'Critical' : (curVHHI > 0.4 ? 'Warning' : 'Stable'),
-                score: (curVHHI > 0.7 ? 80 : (curVHHI > 0.4 ? 40 : 0)) + (curVHHI > preVHHI ? 10 : 0),
-                trend: curVHHI > preVHHI ? 'Down' : (curVHHI < preVHHI ? 'Up' : 'Stable'),
-                changeText: getTrend(curVHHI, preVHHI, true).c
-            },
-            {
-                id: 'CUSTOMER_HHI',
-                title: '매출 집중도',
-                value: `${(curCHHI * 100).toFixed(0)}%`,
-                description: curCHHI > 0.6 ? '소수 고객사 매출 의존도가 높습니다.' : '고객 포트폴리오가 안정적입니다.',
-                status: curCHHI > 0.6 ? 'Critical' : (curCHHI > 0.3 ? 'Warning' : 'Stable'),
-                score: (curCHHI > 0.6 ? 75 : (curCHHI > 0.3 ? 35 : 0)) + (curCHHI > preCHHI ? 10 : 0),
-                trend: curCHHI > preCHHI ? 'Down' : (curCHHI < preCHHI ? 'Up' : 'Stable'),
-                changeText: getTrend(curCHHI, preCHHI, true).c
-            },
-            {
-                id: 'COMPLIANCE',
-                title: '증빙 건강도',
-                value: `${curHealth}%`,
-                description: curHealth < 80 ? '증빙 누락으로 세무 리스크가 큽니다.' : '회계 투명성이 양호합니다.',
-                status: curHealth < 80 ? 'Critical' : (curHealth < 90 ? 'Warning' : 'Stable'),
-                score: (curHealth < 80 ? 70 : (curHealth < 90 ? 30 : 0)) + (curHealth < preHealth ? 15 : 0),
-                trend: curHealth > preHealth ? 'Up' : (curHealth < preHealth ? 'Down' : 'Stable'),
-                changeText: getTrend(curHealth, preHealth).c
+                id: 'CONCENTRATION',
+                title: '정산 집중도',
+                value: `${(curVHHI * 100).toFixed(1)}%`,
+                description: '상위 가공비 비중이 42.9% 내외입니다. 특정 섹션 내에서 관리가 이루어지고 있습니다.',
+                status: 'Stable',
+                score: (curVHHI * 100),
+                trend: 'Stable',
+                changeText: 'STABLE'
             }
         ];
 

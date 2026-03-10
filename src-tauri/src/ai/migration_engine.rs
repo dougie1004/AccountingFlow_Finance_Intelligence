@@ -21,7 +21,7 @@ pub async fn run_smart_migration(
     file_name: String,
 ) -> Result<MigrationSummary, String> {
     // 1. 더존(Douzone) 특화 파싱 엔진 가동
-    let raw_data = crate::accounting::parser::parse_douzone_data(file_bytes, &file_name)?;
+    let raw_data = crate::engine::core::parser::parse_douzone_data(file_bytes, &file_name)?;
     
     // 2. ERP 유형 추론 및 계정 맵핑 (PoC용 가상 로직)
     // 실제로는 여기서 AI를 호출하여 컬럼 구조를 재해석할 수 있습니다.

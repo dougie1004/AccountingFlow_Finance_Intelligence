@@ -33,7 +33,7 @@ pub async fn generate_cash_flow_forecast(
     current_balance: f64,
 ) -> Result<CashFlowForecast, String> {
     // 1. 과거 월별 트렌드 분석 (최근 180일)
-    let today = chrono::Local::now().naive_local();
+    let _today = chrono::Local::now().naive_local();
     let mut monthly_stats = std::collections::BTreeMap::new();
 
     for entry in &ledger {

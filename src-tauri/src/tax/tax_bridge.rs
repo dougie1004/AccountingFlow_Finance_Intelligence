@@ -292,7 +292,7 @@ pub fn generate_tax_pro_pack(
     pack.push_str("1. Fixed Assets (Depreciation Ledger Candidates)\n");
     for asset in assets {
         // Run schedule to check for tax limit overages
-        let schedule = crate::accounting::assets::generate_depreciation_schedule(&asset);
+        let schedule = crate::engine::core::assets::generate_depreciation_schedule(&asset);
         let this_year_item = schedule.items.first(); // Assuming first item involves current year context or strict date checking is needed; using simple check for demo
         let denial_note = if let Some(item) = this_year_item {
              if let Some(disallowed) = item.disallowed_amount {

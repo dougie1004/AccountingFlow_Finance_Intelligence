@@ -30,6 +30,7 @@ pub fn generate_journal_from_scm(order: &Order, tenant_id: &str) -> Vec<JournalE
             transaction_group_id: None,
             employee_tags: vec![],
             is_insurance_part: false,
+            ..Default::default()
         });
     } else if order.type_field == "SALES" {
         entries.push(JournalEntry {
@@ -56,6 +57,7 @@ pub fn generate_journal_from_scm(order: &Order, tenant_id: &str) -> Vec<JournalE
             transaction_group_id: None,
             employee_tags: vec![],
             is_insurance_part: false,
+            ..Default::default()
         });
     }
 

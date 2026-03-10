@@ -319,7 +319,7 @@ export const Reports: React.FC = () => {
                             {report.bpsInsight && (
                                 <div className="bg-gradient-to-br from-indigo-600/20 to-violet-600/20 rounded-[2.5rem] border border-indigo-500/30 p-8 shadow-2xl animate-in zoom-in duration-500">
                                     <h3 className="text-sm font-black text-indigo-400 flex items-center gap-2 mb-4 uppercase tracking-[0.2em]">
-                                        <Sparkles size={18} /> Optimization Tip
+                                        <span className="mr-2">✨</span> Optimization Tip
                                     </h3>
                                     <p className="text-white font-bold leading-relaxed">{report.bpsInsight}</p>
                                 </div>

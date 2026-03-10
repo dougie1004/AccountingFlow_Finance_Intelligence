@@ -1,16 +1,23 @@
 use crate::core::models::{
     Asset, AuditSnapshot, JournalEntry, Order, ParsedTransaction, SimulationResult, 
-    TaxAdjustment, TenantConfig, AnalysisResponse, Partner, ValidationResult
+    TaxAdjustment, TenantConfig, AnalysisResponse, Partner, ValidationResult,
+    ScenarioDefinition, LedgerScope
 };
 use crate::core::bank_models::BankMapping;
 use std::collections::HashMap;
 use crate::ai::ai_service;
 use crate::ai::csv_inference;
-use crate::accounting::{simulation_engine, assets, inventory_bridge};
+use crate::engine::simulation::projection as simulation_engine;
+use crate::engine::core::assets;
+use crate::engine::core::inventory as inventory_bridge;
 use crate::tax::{tax_bridge, tax_validator, hometax::HometaxEngine};
 use crate::core::security::SecurityGuard;
 use crate::governance::{audit_manager, proof_manager};
-use crate::accounting::advanced_ledger::{AdvancedAccountingModule, AdvancedLedgerInput, AdvancedLedgerOutput, RndCapitalizationEngine};
+use crate::engine::core::ledger::{AdvancedAccountingModule, AdvancedLedgerInput, AdvancedLedgerOutput, RndCapitalizationEngine};
+use crate::engine::simulation::scenario_manager::ScenarioManager;
+use crate::engine::analysis::management_report;
+use crate::engine::analysis::forecast_engine;
+use crate::engine::analysis::ir_engine;
 
 #[tauri::command]
 pub async fn parse_transaction(
@@ -161,7 +168,7 @@ async fn run_compliance_check(tx: &ParsedTransaction, _policy: &str) -> crate::c
 
 #[tauri::command]
 pub async fn process_batch(csv_data: String) -> Result<Vec<ParsedTransaction>, String> {
-    crate::accounting::batch_processor::process_csv_batch(csv_data).await
+    crate::engine::core::batch::process_csv_batch(csv_data).await
 }
 
 #[tauri::command]
@@ -312,8 +319,8 @@ pub fn run_simulation_data() -> SimulationResult {
 }
 
 #[tauri::command]
-pub fn get_startup_insights(ledger: Vec<JournalEntry>) -> crate::accounting::insights::StartupInsights {
-    crate::accounting::insights::calculate_insights(&ledger)
+pub fn get_startup_insights(ledger: Vec<JournalEntry>) -> crate::engine::analysis::insights::StartupInsights {
+    crate::engine::analysis::insights::calculate_insights(&ledger)
 }
 
 #[tauri::command]
@@ -337,23 +344,23 @@ pub fn load_tenant_config(app: tauri::AppHandle) -> Result<TenantConfig, String>
 #[tauri::command]
 pub fn batch_export_with_validation(
     entries: Vec<JournalEntry>
-) -> Result<crate::accounting::batch_export::BatchExportResult, String> {
-    crate::accounting::batch_export::process_batch_export(entries)
+) -> Result<crate::engine::core::export::BatchExportResult, String> {
+    crate::engine::core::export::process_batch_export(entries)
 }
 
 #[tauri::command]
 pub async fn detect_batch_anomalies(
     entries: Vec<JournalEntry>
 ) -> Result<Vec<String>, String> {
-    crate::accounting::batch_export::detect_anomalies_with_ai(&entries).await
+    crate::engine::core::export::detect_anomalies_with_ai(&entries).await
 }
 
 #[tauri::command]
 pub async fn generate_cash_flow_forecast(
     ledger: Vec<JournalEntry>,
     current_balance: f64,
-) -> Result<crate::accounting::forecast_engine::CashFlowForecast, String> {
-    crate::accounting::forecast_engine::generate_cash_flow_forecast(ledger, current_balance).await
+) -> Result<forecast_engine::CashFlowForecast, String> {
+    forecast_engine::generate_cash_flow_forecast(ledger, current_balance).await
 }
 
 #[tauri::command]
@@ -363,8 +370,8 @@ pub async fn generate_management_report(
     assets: Vec<Asset>,
     period_start: String,
     period_end: String,
-) -> Result<crate::accounting::report_engine::ManagementReport, String> {
-    crate::accounting::report_engine::generate_management_report(ledger, inventory, assets, period_start, period_end).await
+) -> Result<management_report::ManagementReport, String> {
+    management_report::generate_management_report(ledger, inventory, assets, period_start, period_end).await
 }
 
 #[tauri::command]
@@ -502,15 +509,15 @@ pub async fn process_advanced_ledger(
             engine.process_logic(input, &ledger)
         },
         "stock_compensation" => {
-            let engine = crate::accounting::advanced_ledger::StockCompensationEngine;
+            let engine = crate::engine::core::ledger::StockCompensationEngine;
             engine.process_logic(input, &ledger)
         },
         "currency_revaluation" => {
-            let engine = crate::accounting::advanced_ledger::CurrencyRevaluationEngine;
+            let engine = crate::engine::core::ledger::CurrencyRevaluationEngine;
             engine.process_logic(input, &ledger)
         },
         "tax_credit_finder" => {
-            let engine = crate::accounting::advanced_ledger::TaxCreditFinderEngine;
+            let engine = crate::engine::core::ledger::TaxCreditFinderEngine;
             engine.process_logic(input, &ledger)
         },
         _ => Err(format!("지원하지 않는 특수 회계 모듈입니다: {}", input.module_id)),
@@ -518,8 +525,22 @@ pub async fn process_advanced_ledger(
 }
 
 #[tauri::command]
-pub fn get_ir_financial_summary(ledger: Vec<JournalEntry>) -> crate::accounting::ir_engine::IRFinancialSummary {
-    crate::accounting::ir_engine::generate_ir_summary(&ledger)
+pub fn get_ir_financial_summary(ledger: Vec<JournalEntry>) -> ir_engine::IRFinancialSummary {
+    ir_engine::generate_ir_summary(&ledger)
+}
+
+#[tauri::command]
+pub fn run_strategic_scenario(
+    definition: ScenarioDefinition,
+    ledger: Vec<JournalEntry>
+) -> Vec<JournalEntry> {
+    // 1. Isolation Check: Only use Actual ledger as snapshot source
+    let actual_only: Vec<JournalEntry> = ledger.into_iter()
+        .filter(|e| e.scope == LedgerScope::Actual)
+        .collect();
+    
+    // 2. Project Scenario without mutating actuals
+    ScenarioManager::project_scenario(definition, actual_only)
 }
 
 #[tauri::command]

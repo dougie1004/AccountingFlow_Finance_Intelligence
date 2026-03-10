@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 use crate::core::models::JournalEntry;
-use crate::accounting::insights::{calculate_insights, StartupInsights};
+use crate::engine::analysis::insights::{calculate_insights, StartupInsights};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

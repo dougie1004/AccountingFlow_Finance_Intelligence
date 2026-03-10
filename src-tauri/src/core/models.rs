@@ -9,6 +9,33 @@ pub enum ParseStatus {
     Error,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum LedgerScope {
+    #[default]
+    Actual,   // Real, verified accounting data
+    Forecast, // AI-projected future data
+    Scenario, // What-if strategic simulation data
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenarioAssumption {
+    pub key: String,         // e.g., "revenue_multiplier", "fixed_cost_delta"
+    pub value: f64,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ScenarioDefinition {
+    pub id: String,
+    pub name: String,
+    pub base_snapshot_id: String,
+    pub assumptions: Vec<ScenarioAssumption>,
+    pub created_at: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedTransaction {
@@ -56,9 +83,18 @@ pub struct ParsedTransaction {
     pub employee_tags: Vec<String>,
     #[serde(default)]
     pub is_insurance_part: bool,
+
+    // [CFO Architecture] Ledger Isolation
+    #[serde(default = "default_ledger_scope")]
+    pub scope: LedgerScope,
+    pub scenario_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+fn default_ledger_scope() -> LedgerScope {
+    LedgerScope::Actual
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalEntry {
     pub id: String,
@@ -92,6 +128,11 @@ pub struct JournalEntry {
     pub employee_tags: Vec<String>,
     #[serde(default)]
     pub is_insurance_part: bool,
+
+    // [CFO Architecture] Ledger Isolation
+    #[serde(default = "default_ledger_scope")]
+    pub scope: LedgerScope,
+    pub scenario_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

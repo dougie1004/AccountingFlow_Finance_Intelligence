@@ -147,6 +147,9 @@ pub fn generate_closing_entries(
             transaction_group_id: None,
             employee_tags: vec![],
             is_insurance_part: false,
+            scope: crate::core::models::LedgerScope::Actual,
+            scenario_id: None,
+            ..Default::default()
         });
 
         asset.accumulated_depreciation += amount;

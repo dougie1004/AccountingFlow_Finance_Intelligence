@@ -5,6 +5,7 @@ import BrandHeader from './components/layout/BrandHeader';
 import Journal from './pages/Journal';
 import LedgerView from './pages/LedgerView';
 import Partners from './pages/Partners';
+import StrategicCompass from './pages/StrategicCompass';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import { TaxAdjustments } from './pages/TaxAdjustments';
@@ -41,6 +42,7 @@ const AppContent = () => {
                             <LedgerView />
                         </div>
                         {activeTab === 'scm' && <SCM setTab={setActiveTab} />}
+                        {activeTab === 'strategic-compass' && <StrategicCompass />}
                         {activeTab === 'inventory' && <Inventory />}
                         {activeTab === 'assets' && <Assets />}
                         {activeTab === 'partners' && <Partners />}

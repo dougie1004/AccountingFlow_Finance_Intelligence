@@ -41,6 +41,7 @@ pub fn convert_order_to_journal(order: &Order, tenant_id: &str) -> Vec<JournalEn
                 transaction_group_id: None,
                 employee_tags: vec![],
                 is_insurance_part: false,
+                ..Default::default()
             });
         }
         "Purchase" | "구매" | "RETURN_PURCHASE" => {
@@ -71,6 +72,7 @@ pub fn convert_order_to_journal(order: &Order, tenant_id: &str) -> Vec<JournalEn
                 transaction_group_id: None,
                 employee_tags: vec![],
                 is_insurance_part: false,
+                ..Default::default()
             });
         }
         _ => {}
