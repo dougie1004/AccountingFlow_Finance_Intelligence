@@ -1,7 +1,7 @@
 use crate::core::models::{
     Asset, AuditSnapshot, JournalEntry, Order, ParsedTransaction, SimulationResult, 
     TaxAdjustment, TenantConfig, AnalysisResponse, Partner, ValidationResult,
-    ScenarioDefinition, LedgerScope
+    ScenarioDefinition, LedgerScope, AuditIssue, AuditEntity, Scenario
 };
 use crate::core::bank_models::BankMapping;
 use std::collections::HashMap;
@@ -546,4 +546,144 @@ pub fn run_strategic_scenario(
 #[tauri::command]
 pub fn parse_universal_file(file_bytes: Vec<u8>) -> Result<csv_inference::InferenceResult, String> {
     crate::ai::csv_inference::analyze_csv(file_bytes)
+}
+
+// --- [L4 Governance] Audit & Risk Engine Commands ---
+
+#[tauri::command]
+pub async fn get_audit_issues(project_type: String) -> Result<Vec<AuditIssue>, String> {
+    println!("[Audit] Fetching issues for project: {}", project_type);
+    Ok(vec![
+        AuditIssue {
+            id: 1,
+            issue_title: "고액 현금 인출 및 증빙 미비 (사적 사용 의심)".to_string(),
+            description: "대표이사 개인 계좌로의 원인 불명 5천만원 이체건이 발견되었습니다. 거래처 증빙이 없으며 단기대여금으로도 분류되지 않았습니다.".to_string(),
+            severity: "Critical".to_string(),
+            detected_at: "2026-03-01T10:00:00Z".to_string(),
+            recommendations: Some("가지급금 계정으로 임시 분류 후 법인카드 대체 사용 권고. 소명 불가 시 상여 처분 리스크.".to_string()),
+            evidence_quote: Some("Manual Transfer: CD-OUT-9921".to_string()),
+            ..Default::default()
+        },
+        AuditIssue {
+            id: 2,
+            issue_title: "R&D 인건비 중복 정산 징후".to_string(),
+            description: "동일 인력에 대해 2개 국책 과제에서 인건비가 100%씩 중복 청구된 패턴이 시스템에 의해 탐지되었습니다.".to_string(),
+            severity: "High".to_string(),
+            detected_at: "2026-03-02T14:30:00Z".to_string(),
+            recommendations: Some("과제별 참여율 재조정 및 고용보험 명부 대조 필수. 환수 및 참여 제한 페널티 가능성.".to_string()),
+            ..Default::default()
+        },
+        AuditIssue {
+            id: 3,
+            issue_title: "특수관계자 거래 미공시 리스크".to_string(),
+            description: "최대주주 소유의 별도 법인과의 임대차 거래에서 시가 대비 150% 높은 임차료가 지급되고 있습니다.".to_string(),
+            severity: "Medium".to_string(),
+            detected_at: "2026-03-05T09:15:00Z".to_string(),
+            recommendations: Some("감정평가서 확보 및 부당행위계산 부인 여부 확인.".to_string()),
+            ..Default::default()
+        }
+    ])
+}
+
+#[tauri::command]
+pub async fn get_audit_universe() -> Result<Vec<AuditEntity>, String> {
+    use crate::core::models::{ImpactBreakdown, LikelihoodBreakdown, AiRiskAnalysis};
+    
+    Ok(vec![
+        AuditEntity {
+            id: 1,
+            unit_name: "구매 및 수납 프로세스".to_string(),
+            category: "Operations".to_string(),
+            impact_score: 85.0,
+            likelihood_score: 30.0,
+            status: "Monitoring".to_string(),
+            responsible_dept: "구매본부".to_string(),
+            last_audited: "2025-11-20".to_string(),
+            ai_risk_analysis: AiRiskAnalysis {
+                reason: "구매 시스템 내 권한 분리(SoD) 미흡으로 인한 부정 위험 상존".to_string(),
+                impact_score: 85.0,
+                likelihood_score: 30.0,
+                impact_breakdown: ImpactBreakdown { financial_loss: 90.0, strategic_impact: 70.0, reputation_risk: 95.0 },
+                likelihood_breakdown: LikelihoodBreakdown { historical_frequency: 10.0, control_weakness: 50.0, process_complexity: 30.0 },
+                audit_approach: Some("전수 샘플링 및 결재 로그 대조 감사".to_string()),
+                reference_standard: Some("COSO Framework 2013".to_string()),
+            }
+        },
+        AuditEntity {
+            id: 2,
+            unit_name: "자산 및 재고 관리".to_string(),
+            category: "Finance".to_string(),
+            impact_score: 65.0,
+            likelihood_score: 75.0,
+            status: "High-Risk".to_string(),
+            responsible_dept: "재무팀".to_string(),
+            last_audited: "2025-05-15".to_string(),
+            ai_risk_analysis: AiRiskAnalysis {
+                reason: "최근 3개월간 재고 실사 차이액이 허용 오차(1%)를 지속 초과함".to_string(),
+                impact_score: 65.0,
+                likelihood_score: 75.0,
+                impact_breakdown: ImpactBreakdown { financial_loss: 60.0, strategic_impact: 50.0, reputation_risk: 85.0 },
+                likelihood_breakdown: LikelihoodBreakdown { historical_frequency: 80.0, control_weakness: 70.0, process_complexity: 75.0 },
+                audit_approach: Some("바코드 시스템 전수 조사 및 실물 대조".to_string()),
+                reference_standard: Some("K-IFRS 재고자산 기준서".to_string()),
+            }
+        }
+    ])
+}
+
+#[tauri::command]
+pub async fn ai_suggest_risk_score(unit_name: String) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "impact_score": 78.5,
+        "likelihood_score": 42.0,
+        "reasoning": format!("'{}' 유닛의 과거 감사 이력과 산업군 벤치마크 데이터를 분석한 결과, 자금 집행 단계의 복잡성이 증가하여 리스크가 상향 조정되었습니다.", unit_name)
+    }))
+}
+
+#[tauri::command]
+pub async fn generate_audit_priorities(entities: Vec<AuditEntity>) -> Result<String, String> {
+    Ok("1. 자고 관리 프로세스 정밀 실사 (High Likelihood)\n2. 구매 시스템 SoD 재설계 및 권한 감사 (High Impact)".to_string())
+}
+
+#[tauri::command]
+pub async fn get_all_scenarios() -> Result<Vec<Scenario>, String> {
+    Ok(vec![
+        Scenario {
+            id: "SC-001".to_string(),
+            category: "Tax".to_string(),
+            name: "연구소 기업 전환 시뮬레이션".to_string(),
+            risk_level: "Medium".to_string(),
+            description: "연구소 기업으로 전환 시 법인세 감면 혜택과 설립 요건 미충족 리스크를 비교 분석합니다.".to_string(),
+            origin_audit_type: "전략 수립".to_string(),
+            origin_department: "경영전략".to_string(),
+            detected_date: "2026-03-01".to_string(),
+            is_ai_generated: false,
+        },
+        Scenario {
+            id: "SC-AI-01".to_string(),
+            category: "Compliance".to_string(),
+            name: "거래처 집중도 초과 경고".to_string(),
+            risk_level: "High".to_string(),
+            description: "특정 매출처 비중이 70%를 상회함에 따라, 해당 업체 도산 시 연쇄 부도 위험을 시뮬레이션합니다.".to_string(),
+            origin_audit_type: "패턴 탐지".to_string(),
+            origin_department: "CFE AI".to_string(),
+            detected_date: "2026-03-09".to_string(),
+            is_ai_generated: true,
+        }
+    ])
+}
+
+#[tauri::command]
+pub async fn ask_ai_assistant(message: String, tenant_id: String) -> Result<String, String> {
+    println!("[AI Assistant] Tenant: {} | Message: {}", tenant_id, message);
+    
+    // Simple logic: if specific keywords appear, return targeted simulated answers.
+    // In production, this would call Gemini 2.0.
+    if message.contains("리스크") || message.contains("위험") {
+        Ok("현재 가장 높은 리스크는 '매입 집중도'입니다. 상위 3개 거래처에 지출의 85%가 집중되어 있어 대안 공급망 확보가 시급합니다.".to_string())
+    } else if message.contains("현금") || message.contains("런웨이") {
+        Ok("현재 현금 런웨이는 약 14.5개월입니다. 3분기 예정된 설비 투자를 진행할 경우 9개월로 단축될 것으로 예상됩니다.".to_string())
+    } else {
+        Ok(format!("'{}'에 대해 분석한 결과, 현재까지의 장부 데이터상 특이점은 발견되지 않았습니다. 추가 필터링이 필요하신가요?", message))
+    }
 }

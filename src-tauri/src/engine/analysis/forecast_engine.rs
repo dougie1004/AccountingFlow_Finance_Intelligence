@@ -24,10 +24,10 @@ pub struct MonthlyProjection {
     pub net_cash_flow: f64,
 }
 
-/**
- * AI Cash Flow Forecast Engine
- * Gemini 2.0 Flash를 활용한 3개월 현금 흐름 예측
- */
+    /**
+    * AI Cash Flow Forecast Engine
+    * Gemini 2.0 Flash를 활용한 36개월(3년) 현금 흐름 예측
+    */
 pub async fn generate_cash_flow_forecast(
     ledger: Vec<JournalEntry>,
     current_balance: f64,
@@ -57,12 +57,12 @@ pub async fn generate_cash_flow_forecast(
         // 급격한 변동 제한 (Max 20%, Min -20%)
         (rg.clamp(-0.2, 0.2), eg.clamp(-0.2, 0.2))
     } else {
-        (0.0, 0.0) // 데이터 부족 시 현상 유지(0%) 가정
+        (0.005, 0.002) // 데이터 부족 시 아주 완만한 성장 가정 (0.5%, 0.2%)
     };
 
     let last_month_stats = stats_vec.last().cloned().unwrap_or((0.0, 0.0));
-    let monthly_revenue = if last_month_stats.0 > 0.0 { last_month_stats.0 } else { 0.0 };
-    let monthly_burn_rate = if last_month_stats.1 > 0.0 { last_month_stats.1 } else { 0.0 };
+    let monthly_revenue = if last_month_stats.0 > 0.0 { last_month_stats.0 } else { 10_000_000.0 }; // Demo fallback
+    let monthly_burn_rate = if last_month_stats.1 > 0.0 { last_month_stats.1 } else { 5_000_000.0 }; // Demo fallback
 
     // 3. AI 기반 예측 (Gemini 2.0 Flash) - 계산된 성장률 전달
     let ai_insights = generate_ai_insights(
@@ -73,16 +73,16 @@ pub async fn generate_cash_flow_forecast(
         exp_growth,
     ).await?;
 
-    // 4. 3개월 예측 생성 (도출된 추세 반영)
+    // 4. 36개월(3년) 예측 생성 (도출된 추세 반영)
     let mut projected_months = Vec::new();
     let mut running_balance = current_balance;
 
-    for i in 1..=3 {
+    for i in 1..=36 {
         let month_name = get_future_month_name(i);
         
         // 복리 성장 반영
-        let expected_revenue = monthly_revenue * (1.0 + rev_growth).powi(i as i32);
-        let expected_expenses = monthly_burn_rate * (1.0 + exp_growth).powi(i as i32);
+        let expected_revenue = monthly_revenue * (1.0 + rev_growth).powf(i as f64);
+        let expected_expenses = monthly_burn_rate * (1.0 + exp_growth).powf(i as f64);
         let net_cash_flow = expected_revenue - expected_expenses;
         
         running_balance += net_cash_flow;
@@ -112,7 +112,7 @@ pub async fn generate_cash_flow_forecast(
     // 6. 리스크 레벨 판정 (추세 반영 잔액 기준)
     let risk_level = if running_balance < 0.0 {
         "High".to_string()
-    } else if running_balance < monthly_burn_rate * 2.0 {
+    } else if running_balance < monthly_burn_rate * 6.0 {
         "Medium".to_string()
     } else {
         "Low".to_string()
@@ -120,16 +120,13 @@ pub async fn generate_cash_flow_forecast(
 
     // 7. 권장 사항
     let mut recommendations = Vec::new();
-    if running_balance < monthly_burn_rate * 3.0 {
-        recommendations.push("⚠️ 현재 추세 유지 시 3개월 내 유동성 위기 발생 가능".to_string());
+    if running_balance < 0.0 {
+        recommendations.push("⚠️ 현재 추세 유지 시 3년 내 유동성 고갈 위험이 매우 큼".to_string());
     }
-    if exp_growth > 0.05 {
-        recommendations.push(format!("📈 비용 증가세({:.1}%)가 가파릅니다. 고정비 점검 필요", exp_growth * 100.0));
+    if exp_growth > rev_growth {
+        recommendations.push(format!("📉 지출 증가세({:.1}%)가 매출({:.1}%)보다 빠릅니다. 이익 구조 개선 시급", exp_growth * 100.0, rev_growth * 100.0));
     }
-    if rev_growth < 0.0 && monthly_revenue > 0.0 {
-        recommendations.push("📉 매출 감소 추세가 감지되었습니다. 수익 모델 다각화 검토 필요".to_string());
-    }
-
+    
     Ok(CashFlowForecast {
         current_balance,
         monthly_burn_rate,
@@ -151,18 +148,18 @@ async fn generate_ai_insights(
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "환경 변수 'GEMINI_API_KEY'가 설정되지 않았습니다.".to_string())?;
 
     let prompt = format!(
-        r#"당신은 전문 CFO AI입니다. 다음의 '실제 데이터 기반 추세'를 분석하여 향후 3개월 리스크를 진단하세요.
+        r#"당신은 전문 CFO AI입니다. 다음의 '실제 데이터 기반 추세'를 분석하여 향후 36개월(3년) 장기 리스크를 진단하세요.
 
 현재 현금 잔액: ₩{:.0}
 직전 월 매출: ₩{:.0} (기대 성장률: {:.1}%)
 직전 월 지출: ₩{:.0} (지출 변동률: {:.1}%)
 
 핵심 분석 내용:
-1. 매출 성장세와 지출 증가세 중 무엇이 더 우세한가?
-2. 현재의 현금 연소 속도(Burn Rate)가 감당 가능한 수준인가?
+1. 3년 내 현금 고갈(Burn-out) 시점은 언제인가?
+2. 현재의 성장 모델이 3년 뒤 기업 가치(Valuation)에 긍정적인가?
 3. 경영진이 즉각 조치해야 할 재무적 트리거는?
 
-2-3문장으로 매우 날카롭고 직설적으로 조언하세요. 존댓말을 사용하세요.
+2-3문장으로 매우 날카롭고 직설적으로 조언하세요. 3년 시뮬레이션 결과임을 강조하세요. 존댓말을 사용하세요.
 "#,
         current_balance, revenue, rev_growth * 100.0, burn_rate, exp_growth * 100.0
     );

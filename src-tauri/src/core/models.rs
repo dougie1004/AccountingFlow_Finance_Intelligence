@@ -346,3 +346,76 @@ pub struct TaxFilingPackage {
     pub risk_summary: String,
     pub requires_audit: bool,
 }
+
+// --- [L4 Advanced] Governance & Audit Heatmap Models ---
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AuditIssue {
+    pub id: u32,
+    pub issue_title: String,
+    pub description: String,
+    pub severity: String,
+    pub detected_at: String,
+    pub row_index: Option<u32>,
+    pub raw_row_data: Option<String>,
+    pub recommendations: Option<String>,
+    pub evidence_quote: Option<String>,
+    pub audit_id: Option<String>,
+    pub evidence_image: Option<String>,
+    pub manager_comment: Option<String>,
+    pub remediation_plan: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AuditEntity {
+    pub id: u32,
+    pub unit_name: String,
+    pub category: String,
+    pub impact_score: f32,
+    pub likelihood_score: f32,
+    pub status: String,
+    pub responsible_dept: String,
+    pub last_audited: String,
+    pub ai_risk_analysis: AiRiskAnalysis,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiRiskAnalysis {
+    pub reason: String,
+    pub impact_score: f32,
+    pub likelihood_score: f32,
+    pub impact_breakdown: ImpactBreakdown,
+    pub likelihood_breakdown: LikelihoodBreakdown,
+    pub audit_approach: Option<String>,
+    pub reference_standard: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpactBreakdown {
+    pub financial_loss: f32,
+    pub strategic_impact: f32,
+    pub reputation_risk: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LikelihoodBreakdown {
+    pub historical_frequency: f32,
+    pub control_weakness: f32,
+    pub process_complexity: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+// Note: Frontend ScenarioManager.tsx uses snake_case for these fields!
+pub struct Scenario {
+    pub id: String,
+    pub category: String,
+    pub name: String,
+    pub risk_level: String,
+    pub description: String,
+    pub origin_audit_type: String,
+    pub origin_department: String,
+    pub detected_date: String,
+    pub is_ai_generated: bool,
+}

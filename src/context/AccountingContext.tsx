@@ -258,7 +258,13 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     };
 
     const loadSimulation = (result: Partial<SimulationResult>) => {
-        if (result.ledger) setLedger(result.ledger.map(e => ({ ...e, status: e.status || 'Approved' })));
+        console.log("[AccountingContext] loadSimulation called with:", result);
+        if (result.ledger) {
+            console.log("[AccountingContext] Ledger found in result, count:", result.ledger.length);
+            setLedger(result.ledger.map(e => ({ ...e, status: e.status || 'Approved' })));
+        } else {
+            console.warn("[AccountingContext] No ledger found in simulation result! Check field naming.");
+        }
         if (result.assets) setAssets(result.assets);
         if (result.orders) setScmOrders(result.orders);
         if (result.inventory) setInventory(result.inventory);
@@ -302,8 +308,14 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         let expenses = 0;
 
         const approvedLedger = ledger.filter(e => e.status === 'Approved');
+        console.log(`[Financials] Aggregating ${approvedLedger.length} approved entries out of ${ledger.length} total.`);
 
-        approvedLedger.forEach((entry) => {
+
+        approvedLedger.forEach((entry, idx) => {
+            if (idx === 0) {
+                console.log("[AccountingContext] First Entry Keys:", Object.keys(entry));
+                console.log("[AccountingContext] First Entry Sample:", entry);
+            }
             const totalAmount = entry.amount + (entry.vat || 0);
 
             const processAccount = (acc: string, amount: number, isDebit: boolean) => {
@@ -311,7 +323,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                 const lowAcc = (acc || '').toLowerCase().trim();
 
                 // [Antigravity] Debug: Trace Cash Flow
-                if (lowAcc.includes('보통') || lowAcc.includes('예금')) {
+                if (lowAcc.includes('보통') || lowAcc.includes('예금') || lowAcc.includes('현금')) {
                     console.log(`[Financials] Cash Event: ${entry.date} | ${lowAcc} | ${isDebit ? 'Debit' : 'Credit'} | ${amount}`);
                 }
 

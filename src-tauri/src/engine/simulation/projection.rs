@@ -96,6 +96,64 @@ pub fn run_simulation() -> SimulationResult {
         ..Default::default()
     });
 
+    // 3. February 2026 Trends
+    ledger.push(JournalEntry {
+        id: "JE-FEBRUARY-01".to_string(),
+        date: "2026-02-10".to_string(),
+        description: "SaaS 플랫폼 2월분 구독료 매출 (15% 성장)".to_string(),
+        vendor: Some("B사 (주요고객)".to_string()),
+        debit_account: "현금".to_string(),
+        credit_account: "매출".to_string(),
+        amount: 115_000_000.0,
+        vat: 11_500_000.0,
+        entry_type: "Revenue".to_string(),
+        status: "Approved".to_string(),
+        ..Default::default()
+    });
+
+    ledger.push(JournalEntry {
+        id: "JE-FEBRUARY-02".to_string(),
+        date: "2026-02-28".to_string(),
+        description: "2월분 정규 급여 및 상여".to_string(),
+        vendor: Some("임직원 일동".to_string()),
+        debit_account: "급여".to_string(),
+        credit_account: "현금".to_string(),
+        amount: 42_000_000.0,
+        vat: 0.0,
+        entry_type: "Payroll".to_string(),
+        status: "Approved".to_string(),
+        ..Default::default()
+    });
+
+    // 4. March 2026 Trends (Current)
+    ledger.push(JournalEntry {
+        id: "JE-MARCH-01".to_string(),
+        date: "2026-03-10".to_string(),
+        description: "SaaS 플랫폼 3월분 구독료 매출 (10% 추가성장)".to_string(),
+        vendor: Some("C사 (신규 가입)".to_string()),
+        debit_account: "현금".to_string(),
+        credit_account: "매출".to_string(),
+        amount: 126_500_000.0,
+        vat: 12_650_000.0,
+        entry_type: "Revenue".to_string(),
+        status: "Approved".to_string(),
+        ..Default::default()
+    });
+
+    ledger.push(JournalEntry {
+        id: "JE-MARCH-02".to_string(),
+        date: "2026-03-15".to_string(),
+        description: "3월분 마케팅 대행 수수료 (Growth 전략)".to_string(),
+        vendor: Some("에코마케팅".to_string()),
+        debit_account: "광고선전비".to_string(),
+        credit_account: "현금".to_string(),
+        amount: 15_000_000.0,
+        vat: 1_500_000.0,
+        entry_type: "Expense".to_string(),
+        status: "Approved".to_string(),
+        ..Default::default()
+    });
+
     let assets = vec![
         crate::core::models::Asset {
             id: "AST-2026-001".to_string(),

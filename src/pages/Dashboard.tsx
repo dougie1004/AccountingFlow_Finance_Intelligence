@@ -3,23 +3,26 @@ import { useAccounting } from '../hooks/useAccounting';
 import {
     TrendingUp,
     CreditCard,
-    Package,
-    Building2,
     Calendar,
     ArrowUpRight,
-    ArrowDownRight,
     Activity,
     Wallet,
     Play,
     ShieldCheck,
     Terminal,
     Zap,
-    HelpCircle
+    HelpCircle,
+    Target,
+    AlertTriangle,
+    CheckCircle2,
+    AlertCircle,
+    X,
+    ExternalLink
 } from 'lucide-react';
 import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
+    BarChart, Bar
 } from 'recharts';
-import { motion } from 'framer-motion';
 import { RecentTransactions } from '../components/dashboard/RecentTransactions';
 import { AIForecastPanel } from '../components/dashboard/AIForecastPanel';
 import { ManagementReportPanel } from '../components/dashboard/ManagementReportPanel';
@@ -40,6 +43,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
 
     const [isSimulating, setIsSimulating] = useState(false);
     const [isDemoMode, setIsDemoMode] = useState(false);
+    const [activeModal, setActiveModal] = useState<'runway' | 'concentration' | null>(null);
 
     const handleRunSimulation = () => {
         const results = generateSystemWideMockData();
@@ -125,6 +129,8 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
         };
     }, [ledger]);
 
+    const runwayMonths = analytics.averageMonthlyBurn > 0 ? (financials?.realAvailableCash || 0) / analytics.averageMonthlyBurn : 0;
+
     const briefing = useMemo(() => {
         if (!analytics.hasActivity) {
             return {
@@ -135,7 +141,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
             };
         }
 
-        const runway = analytics.isProfitable ? 999 : (analytics.averageMonthlyBurn > 0 ? (financials?.realAvailableCash || 0) / analytics.averageMonthlyBurn : 24);
+        const runway = analytics.isProfitable ? 999 : (runwayMonths || 24);
 
         let status = 'CRITICAL';
         let message = "유동성 위기 단계입니다. 즉각적인 비용 절감 및 자금 조달 전략이 시급합니다.";
@@ -157,7 +163,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
             schedule: "금일 실시간 전표 처리: 정상 가동 중",
             message
         };
-    }, [financials, analytics]);
+    }, [financials, analytics, runwayMonths]);
 
     const kpiCards = [
         { label: '현금 및 현금성 자산', description: 'BS 상의 총 현금 및 예금 계정 잔액 합계입니다.', value: financials?.cash || 0, icon: Wallet, color: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -168,33 +174,42 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
 
     return (
         <div className="flex-1 bg-[#0B1221] space-y-6 animate-in fade-in duration-500 pb-12">
-            <header className="flex flex-col gap-6">
-                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-                    <div>
-                        <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight flex items-center gap-3">
-                            <Activity className="text-indigo-400" size={32} />
-                            경영 관리 대시보드
-                        </h2>
-                        <p className="text-slate-400 font-bold mt-2 ml-1 text-xs md:text-sm uppercase tracking-wider">Enterprise Financial Controller Console</p>
+            <header className="flex flex-col xl:flex-row xl:items-start justify-between gap-6 pb-2 border-b border-white/5">
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg">
+                            <Activity size={24} />
+                        </div>
+                        <h1 className="text-2xl font-bold text-white tracking-tight">경영 관리 대시보드</h1>
                     </div>
-                    <div className="flex gap-3">
-                        <button
-                            onClick={() => setTab?.('migration')}
-                            className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-black hover:bg-indigo-500 transition-all active:scale-95 shadow-lg shadow-indigo-600/20"
-                        >
-                            <Zap size={16} />
-                            신규 데이터 연계 및 이관
+                    <p className="text-slate-400 font-bold mt-1 ml-1 text-xs uppercase tracking-wider">Enterprise Financial Controller Console</p>
+                </div>
+
+                <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase">SCENARIO MODE:</span>
+                        <div className="flex gap-1">
+                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30">절약(LEAN/SURVIVAL)</button>
+                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-white/5 text-slate-400 hover:text-white">표준(GRANT)</button>
+                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-white/5 text-slate-400 hover:text-white">공격(GROWTH)</button>
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setTab('strategic-compass')} className="px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white rounded-lg text-[10px] font-black tracking-widest uppercase transition-all shadow-lg flex items-center gap-2">
+                            <Play size={12} /> 3개년 시뮬레이션 RUN
                         </button>
                         <button
                             onClick={toggleDemoMode}
                             disabled={isSimulating}
-                            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all active:scale-95 ${isDemoMode ? 'bg-[#1e293b] text-white border border-white/10 shadow-lg' : 'bg-[#151D2E] text-slate-400 border border-white/5'
-                                }`}
+                            className={`px-4 py-2 rounded-lg text-[10px] font-black tracking-widest uppercase transition-all ${isDemoMode ? 'bg-[#1e293b] text-white border border-white/10 shadow-lg' : 'bg-[#151D2E] text-slate-400 border border-white/5'}`}
                         >
-                            <Terminal size={16} />
+                            <Terminal size={12} className="inline mr-1" />
                             {isDemoMode ? '시뮬레이션 가동 중' : '엔터프라이즈 데이터셋 로드'}
                         </button>
                     </div>
+                    <button className="w-full mt-1 px-4 py-1.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-black uppercase text-center flex items-center justify-center gap-2">
+                        <AlertCircle size={12} /> Risk Briefing (Phase 4.5)
+                    </button>
                 </div>
             </header>
 
@@ -205,9 +220,62 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                 hasActivity={analytics.hasActivity}
             />
 
-            <div className="flex items-center gap-2 px-6 py-3 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl w-fit">
-                <ShieldCheck className="text-indigo-400" size={16} />
-                <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">Secured Local-First Architecture: AES-256 GCM Encryption</span>
+            {/* CFO Risk Snapshot */}
+            <div className="space-y-3">
+                <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                    <TrendingUp size={16} className="text-blue-400" />
+                    경영 밸런스 요약 (CFO Risk Snapshot)
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden group">
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="text-xs font-bold text-slate-400">거래의 의존도</p>
+                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
+                                <CheckCircle2 size={10} /> STABLE
+                            </span>
+                        </div>
+                        <h4 className="text-2xl font-black text-white mb-2">0.0%</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            상위 특정 거래처에 대한 의존도가 낮아 사업 안정성이 높습니다.
+                        </p>
+                    </div>
+                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="text-xs font-bold text-slate-400">이익 vs 현금 괴리율</p>
+                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
+                                <CheckCircle2 size={10} /> STABLE
+                            </span>
+                        </div>
+                        <h4 className="text-2xl font-black text-white mb-2">8.2%</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            매출에 따른 현금 회수가 원활하게 진행되고 있습니다.
+                        </p>
+                    </div>
+                    <div className="bg-[#2A231E] border border-amber-500/30 p-5 rounded-2xl shadow-lg relative overflow-hidden cursor-pointer hover:bg-[#332A24] transition-colors" onClick={() => setActiveModal('runway')}>
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="text-xs font-bold text-amber-500">RUNWAY</p>
+                            <span className={`px-2 py-0.5 ${runwayMonths < 6 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-amber-500/20 text-amber-500 border border-amber-500/30'} rounded text-[9px] font-bold flex items-center gap-1`}>
+                                <AlertTriangle size={10} /> {runwayMonths < 6 ? 'CRITICAL' : 'WATCH'}
+                            </span>
+                        </div>
+                        <h4 className="text-2xl font-black text-white mb-2">{runwayMonths.toFixed(1)}개월</h4>
+                        <p className="text-[10px] text-amber-500/70 leading-relaxed">
+                            {runwayMonths < 6 ? '유동성이 부족합니다. 지출 속도를 조절하거나 자본 확충이 필요합니다.' : '현금 흐름 모니터링이 필요합니다.'}
+                        </p>
+                    </div>
+                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden">
+                        <div className="flex justify-between items-start mb-2">
+                            <p className="text-xs font-bold text-slate-400">자산 집중도</p>
+                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
+                                <CheckCircle2 size={10} /> STABLE
+                            </span>
+                        </div>
+                        <h4 className="text-2xl font-black text-white mb-2">42.9%</h4>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                            안전 자산 비율이 적정한 수준을 유지하고 있습니다.
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 auto-rows-auto">
@@ -311,7 +379,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                                 </h3>
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-slate-300 text-xs sm:text-sm font-bold">
                                     <Tooltip content="총 현금에서 확정 부채(AP, VAT) 및 사용 제한 보조금을 차감한, 경영진이 실질적으로 즉시 집행 가능한 자금입니다." position="top">
-                                        <span className="flex items-center gap-1 cursor-help border-b border-indigo-400/20"><Wallet size={12} className="text-indigo-400" /> 가용가용자금: {briefing.cashText} <HelpCircle size={10} className="text-indigo-500/50" /></span>
+                                        <span className="flex items-center gap-1 cursor-help border-b border-indigo-400/20"><Wallet size={12} className="text-indigo-400" /> 가용자금: {briefing.cashText} <HelpCircle size={10} className="text-indigo-500/50" /></span>
                                     </Tooltip>
                                     <span className="flex items-center gap-1"><Calendar size={12} className="text-indigo-400" /> {briefing.schedule}</span>
                                 </div>

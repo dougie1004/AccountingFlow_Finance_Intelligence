@@ -52,7 +52,7 @@ export const AIForecastPanel: React.FC<AIForecastPanelProps> = ({ ledger, curren
 
     useEffect(() => {
         loadForecast();
-    }, [ledger.length]);
+    }, [ledger.length, currentBalance]);
 
     if (isLoading) {
         return (
@@ -120,7 +120,9 @@ export const AIForecastPanel: React.FC<AIForecastPanelProps> = ({ ledger, curren
                             dataKey="name"
                             axisLine={false}
                             tickLine={false}
-                            tick={{ fontSize: 11, fontWeight: 600, fill: '#94a3b8' }}
+                            tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }}
+                            interval={5} // Show one label every 6 months for a clean 3-year view
+                            dy={10}
                         />
                         <YAxis
                             axisLine={false}
@@ -176,13 +178,13 @@ export const AIForecastPanel: React.FC<AIForecastPanelProps> = ({ ledger, curren
                         <p className="text-xs font-bold text-indigo-400 uppercase mb-1 flex items-center gap-1">
                             <Sparkles size={12} /> 실질 가용 자산 <HelpCircle size={10} className="text-indigo-500/50" />
                         </p>
-                        <p className="text-xl font-black text-white">₩{currentBalance.toLocaleString()}</p>
+                        <p className="text-xl font-black text-white">₩{(currentBalance ?? 0).toLocaleString()}</p>
                         <p className="text-[10px] text-slate-500 mt-1 line-through opacity-30">Cash - 확정부채 - 보조금</p>
                     </div>
                 </MyTooltip>
                 <div className="bg-[#0B1221] p-4 rounded-2xl border border-white/5">
                     <p className="text-xs font-bold text-slate-500 uppercase mb-1">월평균 지출</p>
-                    <p className="text-xl font-black text-rose-400">₩{forecast.monthlyBurnRate.toLocaleString()}</p>
+                    <p className="text-xl font-black text-rose-400">₩{(forecast?.monthlyBurnRate ?? 0).toLocaleString()}</p>
                 </div>
                 <div className="bg-[#0B1221] p-4 rounded-2xl border border-white/5">
                     <p className="text-xs font-bold text-slate-500 uppercase mb-1">정부지원금 소진</p>

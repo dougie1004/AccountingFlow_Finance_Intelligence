@@ -62,7 +62,13 @@ pub fn run() {
             commands::get_ir_financial_summary,
             commands::generate_tax_pro_pack,
             commands::parse_universal_file,
-            commands::run_strategic_scenario
+            commands::run_strategic_scenario,
+            commands::get_audit_issues,
+            commands::get_audit_universe,
+            commands::ai_suggest_risk_score,
+            commands::generate_audit_priorities,
+            commands::get_all_scenarios,
+            commands::ask_ai_assistant
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

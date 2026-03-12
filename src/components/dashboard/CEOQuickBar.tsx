@@ -92,11 +92,11 @@ export const CEOQuickBar: React.FC<CEOQuickBarProps> = ({ financials, avgMonthly
                 </div>
                 <h4 className="text-slate-400 font-bold text-xs sm:text-sm tracking-tight mb-4 line-clamp-1">Unrestricted Operating Liquidity</h4>
                 <div className="flex flex-col gap-1 overflow-hidden">
-                    <span className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tighter break-all">₩{financials.realAvailableCash.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                    <span className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tighter break-all">₩{(financials?.realAvailableCash ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                     <div className="flex items-center gap-2 mt-4 p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/10">
                         <Zap size={14} className="text-indigo-400" />
                         <p className="text-[10px] text-indigo-300 font-black uppercase tracking-tight">
-                            Free Cash Est: ₩{operationalFreeCash.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            Free Cash Est: ₩{(operationalFreeCash ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                         </p>
                     </div>
                 </div>
