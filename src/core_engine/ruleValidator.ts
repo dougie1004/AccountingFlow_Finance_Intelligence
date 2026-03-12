@@ -61,7 +61,7 @@ export function validateEntryAgainstRules(
     // ── Hard Rule 4: Receipt Required Policy ─────────────────────
     const isExpense = entry.type === 'Expense' || ASSET_ACCOUNTS.includes(debit);
     if (isExpense && amount >= rules.policies.receiptRequiredOver) {
-        if (!entry.attachments || entry.attachments.length === 0) {
+        if (!entry.attachmentUrl) {
             violations.push({
                 code: 'HR_RECEIPT_MISSING',
                 severity: 'ERROR',
@@ -142,12 +142,12 @@ export function applyPostingGuard(
             blocked.push({ entry, violations: result.violations.filter(v => v.severity === 'ERROR') });
         } else {
             // Stamp appliedRulePackId for audit trail
-            const stamped: JournalEntry = {
+            const stamped: any = {
                 ...entry,
                 appliedRulePackId: rules.id,
                 appliedRuleVersion: rules.version,
             };
-            allowed.push(stamped);
+            allowed.push(stamped as JournalEntry);
 
             const warnViolations = result.violations.filter(v => v.severity === 'WARNING' || v.severity === 'INFO');
             if (warnViolations.length > 0) {

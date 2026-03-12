@@ -17,8 +17,7 @@ import {
     HelpCircle
 } from 'lucide-react';
 import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-    BarChart, Bar, Cell
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
 } from 'recharts';
 import { motion } from 'framer-motion';
 import { RecentTransactions } from '../components/dashboard/RecentTransactions';
@@ -27,7 +26,7 @@ import { ManagementReportPanel } from '../components/dashboard/ManagementReportP
 import { CFOReportCard } from '../components/dashboard/CFOReportCard';
 import { CEOQuickBar } from '../components/dashboard/CEOQuickBar';
 import { Tooltip } from '../components/common/Tooltip';
-import { generateShowcaseData, generateSystemWideMockData } from '../utils/mockDataGenerator';
+import { generateSystemWideMockData } from '../utils/mockDataGenerator';
 import { formatCLevel } from '../utils/formatUtils';
 
 export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab }) => {
@@ -58,11 +57,9 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
 
     // 1. Real-time Aggregation Logic
     const analytics = useMemo(() => {
-        // 1. 실제 과거 6개월 데이터 집계 (연도-월 기준)
         const today = new Date();
         const past6MonthsKeys: string[] = [];
         const monthlyData: Record<string, { income: number; expense: number }> = {};
-        const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
 
         for (let i = 5; i >= 0; i--) {
             const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
@@ -99,7 +96,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
         ledger.forEach(e => {
             if (e.description.includes('[R&D]')) rndAssetValue += e.amount;
             if (e.description.includes('Stock Option')) stockOptionExpense += e.amount;
-            if (e.vendor === 'Forex') {
+            if (e.description.includes('FX') || e.vendor === 'Forex') {
                 fxGainLoss += (e.amount * 0.05);
                 fxExposure += e.amount;
             }
@@ -111,7 +108,6 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
         const averageMonthlyBurn = totalExpenseLast3m / Math.min(3, cashFlowData.length || 1);
         const averageMonthlyRevenue = totalRevenueLast3m / Math.min(3, cashFlowData.length || 1);
 
-        // 흑자 여부는 매출이 발생하고, 그 매출이 비용보다 클 때만 true로 설정
         const isProfitable = averageMonthlyRevenue > 0 && averageMonthlyRevenue >= averageMonthlyBurn;
         const hasActivity = ledger.length > 0;
 
@@ -133,22 +129,20 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
         if (!analytics.hasActivity) {
             return {
                 status: 'READY',
-                cashText: `₩${financials.realAvailableCash.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+                cashText: `₩${(financials?.realAvailableCash || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                 schedule: "데이터 연동 대기 중",
                 message: "현재 분석할 경영 데이터가 존재하지 않습니다. 전표 데이터 또는 시뮬레이션 데이터셋을 가동하여 분석을 시작하십시오."
             };
         }
 
-        // More conservative runway calculation (Enterprise Standard)
-        // If profitable, runway is effectively infinite
-        const runway = analytics.isProfitable ? 999 : (analytics.averageMonthlyBurn > 0 ? financials.realAvailableCash / analytics.averageMonthlyBurn : 24);
+        const runway = analytics.isProfitable ? 999 : (analytics.averageMonthlyBurn > 0 ? (financials?.realAvailableCash || 0) / analytics.averageMonthlyBurn : 24);
 
         let status = 'CRITICAL';
         let message = "유동성 위기 단계입니다. 즉각적인 비용 절감 및 자금 조달 전략이 시급합니다.";
 
         if (analytics.isProfitable) {
             status = 'GROWTH';
-            message = "안정적인 흑자 구조를 유지하고 있습니다. 잉여 현금 흐름을 통한 재투자 전략 수립이 권장됩니다.";
+            message = "안정적인 흑자 구조를 유지하고 있습니다. 잉여 현금 흐름을 통한 투자 전략 수립을 권장합니다.";
         } else if (runway >= 12) {
             status = 'STABLE';
             message = "자금 흐름이 안정적입니다. 장기적인 투자 및 재무 전략 추진이 가능합니다.";
@@ -159,17 +153,17 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
 
         return {
             status,
-            cashText: `₩${financials.realAvailableCash.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-            schedule: "금일 실시간 전표 처리: 0건 대기 중",
+            cashText: `₩${(financials?.realAvailableCash || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+            schedule: "금일 실시간 전표 처리: 정상 가동 중",
             message
         };
     }, [financials, analytics]);
 
     const kpiCards = [
-        { label: '현금 및 현금성 자산', description: 'BS 상의 총 현금 및 예금 계정 잔액 합계입니다.', value: financials.cash, icon: Wallet, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-        { label: '매출채권 (AR)', description: '발생주의 기준 매출 중 아직 현금으로 회수되지 않은 미수금 총액입니다.', value: financials.ar, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-        { label: '매입채무 (AP)', description: '확정된 비용 중 아직 지급되지 않은 채무이며, 상환 시 가용 자금이 감소합니다.', value: financials.ap, icon: CreditCard, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-        { label: '현금 연소율 (Burn Rate)', description: '최근 3개월간의 평균 월간 현금 유출액으로, 런웨이(Runway) 분석의 핵심 지표입니다.', value: analytics.averageMonthlyBurn, icon: Activity, color: 'text-indigo-400', bg: 'bg-indigo-500/10' }
+        { label: '현금 및 현금성 자산', description: 'BS 상의 총 현금 및 예금 계정 잔액 합계입니다.', value: financials?.cash || 0, icon: Wallet, color: 'text-blue-400', bg: 'bg-blue-500/10' },
+        { label: '매출채권 (AR)', description: '발생주의 기준 매출 중 아직 현금으로 회수되지 않은 미수금 총액입니다.', value: financials?.ar || 0, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+        { label: '매입채무 (AP)', description: '확정된 비용 중 아직 지급되지 않은 채무이며, 상환 시 가용한 자금이 감소합니다.', value: financials?.ap || 0, icon: CreditCard, color: 'text-rose-400', bg: 'bg-rose-500/10' },
+        { label: '현금 연소율 (Burn Rate)', description: '최근 3개월간의 평균 월간 현금 유출액으로, 런웨이 분석의 핵심 지표입니다.', value: analytics.averageMonthlyBurn, icon: Activity, color: 'text-indigo-400', bg: 'bg-indigo-500/10' }
     ];
 
     return (
@@ -189,7 +183,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                             className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-black hover:bg-indigo-500 transition-all active:scale-95 shadow-lg shadow-indigo-600/20"
                         >
                             <Zap size={16} />
-                            신규 데이터 인계 및 연동
+                            신규 데이터 연계 및 이관
                         </button>
                         <button
                             onClick={toggleDemoMode}
@@ -198,7 +192,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                                 }`}
                         >
                             <Terminal size={16} />
-                            {isDemoMode ? '데이터 프로젝션 가동 중' : '엔터프라이즈 데이터셋 프로젝션'}
+                            {isDemoMode ? '시뮬레이션 가동 중' : '엔터프라이즈 데이터셋 로드'}
                         </button>
                     </div>
                 </div>
@@ -231,7 +225,6 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                         </div>
                     </div>
                     <div className="flex-1 w-full min-w-0">
-                        {/* Recharts dimension fix: Ensure container is mounted before calculating size */}
                         {isMounted && (
                             <ResponsiveContainer width="100%" height="100%">
                                 <AreaChart data={analytics.cashFlowData}>
@@ -265,8 +258,8 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                         metrics={analytics}
                         onViewReport={() => setTab('reports')}
                         certifications={{
-                            hasRDDept: config.entityMetadata?.hasRDDept,
-                            hasRDLab: config.entityMetadata?.hasRDLab
+                            hasRDDept: config?.entityMetadata?.hasRDDept,
+                            hasRDLab: config?.entityMetadata?.hasRDLab
                         }}
                     />
                 </div>
@@ -292,7 +285,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                 <div className="md:col-span-2 lg:col-span-4">
                     <AIForecastPanel
                         ledger={ledger}
-                        currentBalance={financials.realAvailableCash}
+                        currentBalance={financials?.realAvailableCash || 0}
                     />
                 </div>
 
@@ -318,7 +311,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                                 </h3>
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-slate-300 text-xs sm:text-sm font-bold">
                                     <Tooltip content="총 현금에서 확정 부채(AP, VAT) 및 사용 제한 보조금을 차감한, 경영진이 실질적으로 즉시 집행 가능한 자금입니다." position="top">
-                                        <span className="flex items-center gap-1 cursor-help border-b border-indigo-400/20"><Wallet size={12} className="text-indigo-400" /> 실가용자금: {briefing.cashText} <HelpCircle size={10} className="text-indigo-500/50" /></span>
+                                        <span className="flex items-center gap-1 cursor-help border-b border-indigo-400/20"><Wallet size={12} className="text-indigo-400" /> 가용가용자금: {briefing.cashText} <HelpCircle size={10} className="text-indigo-500/50" /></span>
                                     </Tooltip>
                                     <span className="flex items-center gap-1"><Calendar size={12} className="text-indigo-400" /> {briefing.schedule}</span>
                                 </div>
@@ -332,7 +325,7 @@ export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab 
                                 onClick={() => setTab?.('advanced-ledger')}
                                 className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-white font-black rounded-xl border border-white/10 transition-all active:scale-95"
                             >
-                                상세 전략 모듈 가동 <ArrowUpRight size={18} />
+                                상세 전략 모듈 가기 <ArrowUpRight size={18} />
                             </button>
                         </div>
                     </div>

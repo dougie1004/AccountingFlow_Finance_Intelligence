@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
     LayoutDashboard,
     BookOpen,
@@ -19,8 +19,7 @@ import {
     FileText,
     Zap,
     PieChart,
-    TrendingDown,
-    Wallet
+    TrendingDown
 } from 'lucide-react';
 import { useContext } from 'react';
 import { AccountingContext } from '../../context/AccountingContext';
@@ -53,35 +52,36 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
 
     const menuGroups = [
         {
-            title: '경영 및 전략 (STRATEGY)',
+            title: '寃쎌쁺 諛?遺꾩꽍 (Analysis)',
             items: [
-                { id: 'dashboard', label: 'CFO 대시보드', description: '실시간 자금 흐름과 전사적 성과 지표를 한눈에 모니터링합니다.', icon: LayoutDashboard },
-                { id: 'reports', label: '경영 분석 리포트', description: 'IR 및 경영진 보고용 자동 생성 리포트를 조회합니다.', icon: TrendingUp },
-                { id: 'strategic-compass', label: '스트래티직 컴퍼스', description: '미래 시나리오 시뮬레이션 및 성장 전략을 수립합니다.', icon: Zap, badge: true, badgeText: "AI Simulation" },
-                { id: 'monthly-pnl', label: '월별 손익 현황', description: '월 단위 정밀 손익 분석 및 추세를 확인합니다.', icon: PieChart },
+                { id: 'dashboard', label: '??쒕낫??, description: '?꾧툑 ?먮쫫, 二쇱슂 KPI ???뚯궗???щТ ?곹깭瑜??뚯븙?⑸땲??', icon: LayoutDashboard },
+                { id: 'reports', label: '寃쎌쁺 遺꾩꽍 由ы룷??, description: 'IR??諛?寃쎌쁺吏?????ъ링 遺꾩꽍 由ы룷?몃? ?앹꽦?⑸땲??', icon: TrendingUp },
             ]
         },
         {
-            title: '회계 및 세무 (ACCOUNTING)',
+            title: '?뚭퀎 ?먯옣 (Accounting)',
             items: [
-                { id: 'ledger', label: '분개장 (Journal)', description: '모든 회계 거래 내역을 조회하고 관리합니다.', icon: BookOpen },
-                { id: 'ledger-view', label: '총계정원장 (GL)', description: '계정 과목별 상세 원장 데이터를 확인합니다.', icon: FileText },
-                { id: 'approval-desk', label: '전표 승인 데스크', description: 'AI가 분류한 전표의 신뢰도를 검증하고 최종 승인합니다.', icon: ShieldCheck, badge: true, badgeText: "Governance" },
-                { id: 'trial-balance', label: '합계잔액시산표 (TB)', description: '시산표를 통해 자산, 부채, 자본의 균형을 검증합니다.', icon: Calculator },
-                { id: 'financial-statements', label: '재무제표 (B/S, P/L)', description: '공식적인 재무상태표와 손익계산서를 산출합니다.', icon: PieChart },
-                { id: 'tax-adjustments', label: '세무 조정 엔진', description: '법인세 추정 및 세무 조정 사항을 관리합니다.', icon: Calculator },
-                { id: 'advanced-ledger', label: '특수 회계 관리', description: 'R&D 자산화, 외화 평가 등 고난도 회계 처리를 수행합니다.', icon: Zap },
+                { id: 'ledger', label: '嫄곕옒 ?꾪몴 愿由?, description: 'AI媛 異붿텧??紐⑤뱺 嫄곕옒 ?곗씠?곕? 議고쉶?섍퀬 愿由ы빀?덈떎.', icon: BookOpen },
+                { id: 'ledger-view', label: '珥앷퀎?뺤썝??(G/L)', description: '?쒖? ?뚭퀎 湲곗????곕Ⅸ 怨꾩젙蹂??먯옣??議고쉶?⑸땲??', icon: FileText },
+                { id: 'approval-desk', label: '?꾪몴 ?뱀씤 ?곗뒪??, description: 'AI 遺꾨쪟 ?꾪몴???좊ː?꾨? 寃利앺븯怨?理쒖쥌 ?뱀씤?⑸땲??', icon: ShieldCheck, badge: true },
+                { id: 'financial-statements', label: '?щТ?쒗몴 (B/S, P/L)', description: '?李⑤?議고몴, ?먯씡怨꾩궛?????쒖? ?щТ?쒗몴瑜?議고쉶?⑸땲??', icon: PieChart },
+                { id: 'lease-ledger', label: '由ъ뒪 ?뚭퀎 愿由?, description: 'K-IFRS 1116 由ъ뒪 ?먯궛/遺梨?諛??곹솚 ?ㅼ?以꾩쓣 愿由ы빀?덈떎.', icon: TrendingDown },
+                { id: 'advanced-ledger', label: '?뱀닔 ?뚭퀎 愿由?, description: 'R&D ?먯궛?? ?명솕 ?됯? ??怨좊궃??泥섎━瑜??섑뻾?⑸땲??', icon: Zap },
             ]
         },
         {
-            title: '운영 및 자산 (OPERATIONS)',
+            title: '?댁쁺 諛??먯궛 (Operations)',
             items: [
-                { id: 'scm', label: '공급망(SCM) 관리', description: '매입/매출 발주 및 물류 프로세스를 추적합니다.', icon: ShoppingCart },
-                { id: 'inventory', label: '재고 자산 관리', description: '품목별 재고 현황 및 가치를 실시간으로 관리합니다.', icon: Package },
-                { id: 'partners', label: '거래처 네트워크', description: '주요 파트너사의 거래 내역 및 상태를 관리합니다.', icon: Users },
-                { id: 'assets', label: '고정자산 관리', description: '유/무형 자산의 취득 및 감가상각을 관리합니다.', icon: Landmark },
-                { id: 'lease-ledger', label: '리스 회계 (IFRS 16)', description: '리스 자산의 부채 인식 및 상환 스케줄을 관리합니다.', icon: TrendingDown },
-                { id: 'settlement', label: '채권/채무 정산', description: '미수금 및 미지급금의 연령 분석 및 정산을 수행합니다.', icon: Calculator },
+                { id: 'scm', label: '怨듦툒留?SCM) 愿由?, description: '留ㅼ엯/留ㅼ텧 諛쒖＜ 諛?臾쇰쪟 ?꾨줈?몄뒪瑜?愿由ы빀?덈떎.', icon: ShoppingCart },
+                { id: 'inventory', label: '?ш퀬 ?먯궛 愿由?, description: '?덈ぉ蹂??ш퀬 ?꾪솴 諛?媛移섎? ?ㅼ떆媛꾩쑝濡??됯??⑸땲??', icon: Package },
+                { id: 'assets', label: '怨좎젙?먯궛 愿由?, description: '??臾댄삎 ?먯궛??痍⑤뱷 諛?媛먭??곴컖??愿由ы빀?덈떎.', icon: Landmark },
+                { id: 'partners', label: '嫄곕옒泥??ㅽ듃?뚰겕', description: '二쇱슂 嫄곕옒泥섏???嫄곕옒 愿怨?諛??뱀씤 ?곹깭瑜?愿由ы빀?덈떎.', icon: Users },
+            ]
+        },
+        {
+            title: '?몃Т 諛?洹쒖젣 (Tax)',
+            items: [
+                { id: 'tax-adjustments', label: '?몃Т 議곗젙 ?붿쭊', description: '踰뺤씤??異붿젙, 遺媛??留듯븨 ???꾨Ц ?몃Т 湲곕뒫???섑뻾?⑸땲??', icon: Calculator },
             ]
         }
     ];
@@ -105,24 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 </div>
 
                 <nav className="flex-1 px-4 py-6 space-y-8 overflow-y-auto custom-scrollbar">
-                    <Tooltip content="홈 화면으로 이동합니다." position="right">
-                        <button
-                            onClick={() => {
-                                setTab('home');
-                                if (isMobile) setIsOpen(false);
-                            }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === 'home' || activeTab === 'dashboard' // Treat CFO dashboard and home similarly or separate them
-                                ? 'bg-indigo-600/20 text-indigo-400 font-bold border border-indigo-500/30'
-                                : 'hover:bg-white/5 hover:text-slate-200'
-                                }`}
-                        >
-                            <LayoutDashboard size={18} className={`transition-colors shrink-0 ${activeTab === 'home' || activeTab === 'dashboard' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-                            <span className="font-bold text-[13px] tracking-wide truncate">
-                                홈 (대시보드 메인)
-                            </span>
-                        </button>
-                    </Tooltip>
-
                     {menuGroups.map((group) => (
                         <div key={group.title} className="space-y-2">
                             <h3 className="px-4 text-[10px] font-black text-slate-600 uppercase tracking-[0.15em] mb-3">{group.title}</h3>
@@ -135,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                                 if (isMobile) setIsOpen(false);
                                             }}
                                             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === item.id
-                                                ? 'bg-indigo-600/20 text-indigo-400 font-bold'
+                                                ? 'bg-indigo-600/10 text-indigo-400 shadow-[inset_0_0_20px_rgba(79,70,229,0.1)]'
                                                 : 'hover:bg-white/5 hover:text-slate-200'
                                                 }`}
                                         >
@@ -144,11 +126,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                                 {item.label}
                                             </span>
 
-                                            {item.badge && (
-                                                <span className="ml-auto flex items-center gap-1 bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-slate-700">
-                                                    <ShieldCheck size={10} className="text-amber-500" />
-                                                    {item.badgeText}
+                                            {item.id === 'approval-desk' && unconfirmedCount > 0 && (
+                                                <span className="ml-auto bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[18px] text-center shadow-lg shadow-rose-600/20">
+                                                    {unconfirmedCount}
                                                 </span>
+                                            )}
+
+                                            {activeTab === item.id && (
+                                                <div className={`${item.id === 'approval-desk' && unconfirmedCount > 0 ? 'ml-2' : 'ml-auto'} w-1 h-1 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(79,70,229,0.8)] shrink-0`}></div>
                                             )}
                                         </button>
                                     </Tooltip>
@@ -170,7 +155,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                         className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === 'migration' ? 'bg-indigo-600/10 text-indigo-400' : 'hover:bg-white/5 text-slate-500 hover:text-slate-300'}`}
                     >
                         <Database size={18} className={activeTab === 'migration' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} />
-                        <span className="font-bold text-[13px] tracking-wide">데이터 연동 및 이관</span>
+                        <span className="font-bold text-[13px] tracking-wide">?곗씠???곕룞 諛??닿?</span>
                     </button>
 
                     {/* Theme Toggle Button */}
@@ -192,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                 </svg>
                             )}
                             <span className="font-bold text-[13px] tracking-wide">
-                                {theme === 'auto' ? '자동 테마' : theme === 'light' ? '라이트' : '다크'}
+                                {theme === 'auto' ? '?먮룞 ?뚮쭏' : theme === 'light' ? '?쇱씠?? : '?ㅽ겕'}
                             </span>
                         </div>
                         <span className="text-[9px] font-black text-slate-600 uppercase tracking-wider">
@@ -210,14 +195,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                         className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === 'settings' ? 'bg-indigo-600/10 text-indigo-400' : 'hover:bg-white/5 text-slate-500 hover:text-slate-300'}`}
                     >
                         <Settings size={18} className={activeTab === 'settings' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} />
-                        <span className="font-bold text-[13px] tracking-wide">시스템 설정</span>
+                        <span className="font-bold text-[13px] tracking-wide">?쒖뒪???ㅼ젙</span>
                     </button>
 
                     <div className="my-2 border-t border-white/5" />
 
                     <button
                         onClick={() => {
-                            if (window.confirm('현재 장부의 모든 데이터를 초기화하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                            if (window.confirm('?꾩옱 ?λ???紐⑤뱺 ?곗씠?곕? 珥덇린?뷀븯?쒓쿋?듬땲源? (???묒뾽? ?섎룎由????놁뒿?덈떎)')) {
                                 resetData();
                                 setTab('dashboard');
                             }
@@ -225,12 +210,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                         className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-orange-500/10 hover:text-orange-400 transition-all duration-300 group"
                     >
                         <RotateCcw size={18} className="text-slate-600 group-hover:text-orange-400 shrink-0" />
-                        <span className="font-bold text-[13px] tracking-wide truncate">장부 데이터 초기화</span>
+                        <span className="font-bold text-[13px] tracking-wide truncate">?λ? ?곗씠??珥덇린??/span>
                     </button>
 
                     <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all duration-300 group">
                         <LogOut size={18} className="text-slate-600 group-hover:text-red-400 shrink-0" />
-                        <span className="font-bold text-[13px] tracking-wide truncate">로그아웃</span>
+                        <span className="font-bold text-[13px] tracking-wide truncate">濡쒓렇?꾩썐</span>
                     </button>
                 </div>
             </div>

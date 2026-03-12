@@ -14,13 +14,18 @@ import { DataMigration } from './pages/DataMigration';
 import { SCM } from './pages/SCM';
 import { Assets } from './pages/Assets';
 import { Inventory } from './pages/Inventory';
+import { Closing } from './pages/Closing';
 import { AdvancedLedger } from './pages/AdvancedLedger';
 import FinancialStatements from './pages/FinancialStatements';
+import TrialBalance from './pages/TrialBalance';
 import { LeaseLedger } from './pages/LeaseLedger';
+import MonthlyPnL from './pages/MonthlyPnL';
 
 import { AccountingProvider } from './context/AccountingContext';
 import { ConfigProvider, useConfig } from './context/ConfigContext';
 import { ThemeProvider } from './context/ThemeContext';
+
+import { ExecutiveReport } from './components/dashboard/ExecutiveReport';
 
 const AppContent = () => {
     const [activeTab, setActiveTab] = useState('dashboard');
@@ -34,26 +39,75 @@ const AppContent = () => {
 
                 <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar pt-16 lg:pt-0">
                     <div className="w-full max-w-full p-4 md:p-6 lg:p-8">
-                        {activeTab === 'dashboard' && <Dashboard setTab={setActiveTab} />}
-                        <div style={{ display: activeTab === 'ledger' ? 'block' : 'none' }}>
+                        {/* STRATEGY Group */}
+                        <div style={{ display: (activeTab === 'dashboard' || activeTab === 'home') ? 'block' : 'none' }}>
+                            <Dashboard setTab={setActiveTab} />
+                        </div>
+                        <div style={{ display: activeTab === 'reports' ? 'block' : 'none' }}>
+                            <ExecutiveReport />
+                        </div>
+                        <div style={{ display: activeTab === 'cashflow' ? 'block' : 'none' }}>
+                            <Reports />
+                        </div>
+                        <div style={{ display: (activeTab === 'closing' || activeTab === 'risk-dashboard') ? 'block' : 'none' }}>
+                            <Closing />
+                        </div>
+                        <div style={{ display: activeTab === 'monthly-pnl' ? 'block' : 'none' }}>
+                            <MonthlyPnL />
+                        </div>
+
+                        {/* ACCOUNTING Group */}
+                        <div style={{ display: (activeTab === 'ledger' || activeTab === 'vendor-ledger') ? 'block' : 'none' }}>
                             <Journal />
                         </div>
                         <div style={{ display: activeTab === 'ledger-view' ? 'block' : 'none' }}>
                             <LedgerView />
                         </div>
-                        {activeTab === 'scm' && <SCM setTab={setActiveTab} />}
-                        {activeTab === 'strategic-compass' && <StrategicCompass />}
-                        {activeTab === 'inventory' && <Inventory />}
-                        {activeTab === 'assets' && <Assets />}
-                        {activeTab === 'partners' && <Partners />}
-                        {activeTab === 'reports' && <Reports />}
-                        {activeTab === 'tax-adjustments' && <TaxAdjustments />}
-                        {activeTab === 'financial-statements' && <FinancialStatements />}
-                        {activeTab === 'lease-ledger' && <LeaseLedger />}
-                        {activeTab === 'advanced-ledger' && <AdvancedLedger />}
-                        {activeTab === 'approval-desk' && <ApprovalDesk />}
-                        {activeTab === 'migration' && <DataMigration setTab={setActiveTab} />}
-                        {activeTab === 'settings' && <Settings />}
+                        <div style={{ display: activeTab === 'trial-balance' ? 'block' : 'none' }}>
+                            <TrialBalance />
+                        </div>
+                        <div style={{ display: activeTab === 'financial-statements' ? 'block' : 'none' }}>
+                            <FinancialStatements />
+                        </div>
+
+                        {/* OPERATIONS Group */}
+                        <div style={{ display: (activeTab === 'approval-desk' || activeTab === 'settlement') ? 'block' : 'none' }}>
+                            <ApprovalDesk />
+                        </div>
+                        <div style={{ display: activeTab === 'assets' ? 'block' : 'none' }}>
+                            <Assets />
+                        </div>
+                        <div style={{ display: activeTab === 'lease-ledger' ? 'block' : 'none' }}>
+                            <LeaseLedger />
+                        </div>
+                        <div style={{ display: activeTab === 'partners' ? 'block' : 'none' }}>
+                            <Partners />
+                        </div>
+                        <div style={{ display: (activeTab === 'budget' || activeTab === 'strategic-compass') ? 'block' : 'none' }}>
+                            <StrategicCompass />
+                        </div>
+
+                        {/* SYSTEM Group */}
+                        <div style={{ display: activeTab === 'migration' ? 'block' : 'none' }}>
+                            <DataMigration setTab={setActiveTab} />
+                        </div>
+                        <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+                            <Settings />
+                        </div>
+
+                        {/* Advanced / Hidden */}
+                        <div style={{ display: activeTab === 'inventory' ? 'block' : 'none' }}>
+                            <Inventory />
+                        </div>
+                        <div style={{ display: activeTab === 'scm' ? 'block' : 'none' }}>
+                            <SCM setTab={setActiveTab} />
+                        </div>
+                        <div style={{ display: activeTab === 'tax-adjustments' ? 'block' : 'none' }}>
+                            <TaxAdjustments />
+                        </div>
+                        <div style={{ display: activeTab === 'advanced-ledger' ? 'block' : 'none' }}>
+                            <AdvancedLedger />
+                        </div>
                     </div>
                 </div>
             </main>

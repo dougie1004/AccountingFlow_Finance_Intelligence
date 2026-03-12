@@ -19,8 +19,7 @@ import {
     FileText,
     Zap,
     PieChart,
-    TrendingDown,
-    Wallet
+    TrendingDown
 } from 'lucide-react';
 import { useContext } from 'react';
 import { AccountingContext } from '../../context/AccountingContext';
@@ -53,35 +52,36 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
 
     const menuGroups = [
         {
-            title: '경영 및 전략 (STRATEGY)',
+            title: '경영 및 분석 (Analysis)',
             items: [
-                { id: 'dashboard', label: 'CFO 대시보드', description: '실시간 자금 흐름과 전사적 성과 지표를 한눈에 모니터링합니다.', icon: LayoutDashboard },
-                { id: 'reports', label: '경영 분석 리포트', description: 'IR 및 경영진 보고용 자동 생성 리포트를 조회합니다.', icon: TrendingUp },
-                { id: 'strategic-compass', label: '스트래티직 컴퍼스', description: '미래 시나리오 시뮬레이션 및 성장 전략을 수립합니다.', icon: Zap, badge: true, badgeText: "AI Simulation" },
-                { id: 'monthly-pnl', label: '월별 손익 현황', description: '월 단위 정밀 손익 분석 및 추세를 확인합니다.', icon: PieChart },
+                { id: 'dashboard', label: '대시보드', description: '현금 흐름, 주요 KPI 등 회사의 재무 상태를 파악합니다.', icon: LayoutDashboard },
+                { id: 'reports', label: '경영 분석 리포트', description: 'IR용 및 경영진 대상 심층 분석 리포트를 생성합니다.', icon: TrendingUp },
             ]
         },
         {
-            title: '회계 및 세무 (ACCOUNTING)',
+            title: '회계 원장 (Accounting)',
             items: [
-                { id: 'ledger', label: '분개장 (Journal)', description: '모든 회계 거래 내역을 조회하고 관리합니다.', icon: BookOpen },
-                { id: 'ledger-view', label: '총계정원장 (GL)', description: '계정 과목별 상세 원장 데이터를 확인합니다.', icon: FileText },
-                { id: 'approval-desk', label: '전표 승인 데스크', description: 'AI가 분류한 전표의 신뢰도를 검증하고 최종 승인합니다.', icon: ShieldCheck, badge: true, badgeText: "Governance" },
-                { id: 'trial-balance', label: '합계잔액시산표 (TB)', description: '시산표를 통해 자산, 부채, 자본의 균형을 검증합니다.', icon: Calculator },
-                { id: 'financial-statements', label: '재무제표 (B/S, P/L)', description: '공식적인 재무상태표와 손익계산서를 산출합니다.', icon: PieChart },
-                { id: 'tax-adjustments', label: '세무 조정 엔진', description: '법인세 추정 및 세무 조정 사항을 관리합니다.', icon: Calculator },
-                { id: 'advanced-ledger', label: '특수 회계 관리', description: 'R&D 자산화, 외화 평가 등 고난도 회계 처리를 수행합니다.', icon: Zap },
+                { id: 'ledger', label: '거래 전표 관리', description: 'AI가 추출한 모든 거래 데이터를 조회하고 관리합니다.', icon: BookOpen },
+                { id: 'ledger-view', label: '총계정원장 (G/L)', description: '표준 회계 기준에 따른 계정별 원장을 조회합니다.', icon: FileText },
+                { id: 'approval-desk', label: '전표 승인 데스크', description: 'AI 분류 전표의 신뢰도를 검증하고 최종 승인합니다.', icon: ShieldCheck, badge: true },
+                { id: 'financial-statements', label: '재무제표 (B/S, P/L)', description: '대차대조표, 손익계산서 등 표준 재무제표를 조회합니다.', icon: PieChart },
+                { id: 'lease-ledger', label: '리스 회계 관리', description: 'K-IFRS 1116 리스 자산/부채 및 상환 스케줄을 관리합니다.', icon: TrendingDown },
+                { id: 'advanced-ledger', label: '특수 회계 관리', description: 'R&D 자산화, 외화 평가 등 고난도 처리를 수행합니다.', icon: Zap },
             ]
         },
         {
-            title: '운영 및 자산 (OPERATIONS)',
+            title: '운영 및 자산 (Operations)',
             items: [
-                { id: 'scm', label: '공급망(SCM) 관리', description: '매입/매출 발주 및 물류 프로세스를 추적합니다.', icon: ShoppingCart },
-                { id: 'inventory', label: '재고 자산 관리', description: '품목별 재고 현황 및 가치를 실시간으로 관리합니다.', icon: Package },
-                { id: 'partners', label: '거래처 네트워크', description: '주요 파트너사의 거래 내역 및 상태를 관리합니다.', icon: Users },
+                { id: 'scm', label: '공급망(SCM) 관리', description: '매입/매출 발주 및 물류 프로세스를 관리합니다.', icon: ShoppingCart },
+                { id: 'inventory', label: '재고 자산 관리', description: '품목별 재고 현황 및 가치를 실시간으로 평가합니다.', icon: Package },
                 { id: 'assets', label: '고정자산 관리', description: '유/무형 자산의 취득 및 감가상각을 관리합니다.', icon: Landmark },
-                { id: 'lease-ledger', label: '리스 회계 (IFRS 16)', description: '리스 자산의 부채 인식 및 상환 스케줄을 관리합니다.', icon: TrendingDown },
-                { id: 'settlement', label: '채권/채무 정산', description: '미수금 및 미지급금의 연령 분석 및 정산을 수행합니다.', icon: Calculator },
+                { id: 'partners', label: '거래처 네트워크', description: '주요 거래처와의 거래 관계 및 승인 상태를 관리합니다.', icon: Users },
+            ]
+        },
+        {
+            title: '세무 및 규제 (Tax)',
+            items: [
+                { id: 'tax-adjustments', label: '세무 조정 엔진', description: '법인세 추정, 부가세 맵핑 등 전문 세무 기능을 수행합니다.', icon: Calculator },
             ]
         }
     ];
@@ -105,24 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 </div>
 
                 <nav className="flex-1 px-4 py-6 space-y-8 overflow-y-auto custom-scrollbar">
-                    <Tooltip content="홈 화면으로 이동합니다." position="right">
-                        <button
-                            onClick={() => {
-                                setTab('home');
-                                if (isMobile) setIsOpen(false);
-                            }}
-                            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === 'home' || activeTab === 'dashboard' // Treat CFO dashboard and home similarly or separate them
-                                ? 'bg-indigo-600/20 text-indigo-400 font-bold border border-indigo-500/30'
-                                : 'hover:bg-white/5 hover:text-slate-200'
-                                }`}
-                        >
-                            <LayoutDashboard size={18} className={`transition-colors shrink-0 ${activeTab === 'home' || activeTab === 'dashboard' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'}`} />
-                            <span className="font-bold text-[13px] tracking-wide truncate">
-                                홈 (대시보드 메인)
-                            </span>
-                        </button>
-                    </Tooltip>
-
                     {menuGroups.map((group) => (
                         <div key={group.title} className="space-y-2">
                             <h3 className="px-4 text-[10px] font-black text-slate-600 uppercase tracking-[0.15em] mb-3">{group.title}</h3>
@@ -135,7 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                                 if (isMobile) setIsOpen(false);
                                             }}
                                             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === item.id
-                                                ? 'bg-indigo-600/20 text-indigo-400 font-bold'
+                                                ? 'bg-indigo-600/10 text-indigo-400 shadow-[inset_0_0_20px_rgba(79,70,229,0.1)]'
                                                 : 'hover:bg-white/5 hover:text-slate-200'
                                                 }`}
                                         >
@@ -144,11 +126,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                                 {item.label}
                                             </span>
 
-                                            {item.badge && (
-                                                <span className="ml-auto flex items-center gap-1 bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-slate-700">
-                                                    <ShieldCheck size={10} className="text-amber-500" />
-                                                    {item.badgeText}
+                                            {item.id === 'approval-desk' && unconfirmedCount > 0 && (
+                                                <span className="ml-auto bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-md min-w-[18px] text-center shadow-lg shadow-rose-600/20">
+                                                    {unconfirmedCount}
                                                 </span>
+                                            )}
+
+                                            {activeTab === item.id && (
+                                                <div className={`${item.id === 'approval-desk' && unconfirmedCount > 0 ? 'ml-2' : 'ml-auto'} w-1 h-1 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(79,70,229,0.8)] shrink-0`}></div>
                                             )}
                                         </button>
                                     </Tooltip>

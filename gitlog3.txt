@@ -1,0 +1,3 @@
+﻿c8a9d5f feat: complete restoration of CFO Dashboard UI and stable business logic
+0ceeaa0 security: remove private docs from tracking, strengthen gitignore
+d67179e feat: AccountingFlow Finance Intelligence (clean ??no secrets)

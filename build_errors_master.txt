@@ -1,0 +1,5 @@
+﻿src/components/journal/StagingTable.tsx(284,121): error TS2322: Type '{ size: number; className: string; title: string; }' is not assignable to type 'IntrinsicAttributes & LucideProps'.
+  Property 'title' does not exist on type 'IntrinsicAttributes & LucideProps'.
+src/core_engine/ruleValidator.ts(64,20): error TS2551: Property 'attachments' does not exist on type 'JournalEntry'. Did you mean 'attachmentUrl'?
+src/core_engine/ruleValidator.ts(64,41): error TS2551: Property 'attachments' does not exist on type 'JournalEntry'. Did you mean 'attachmentUrl'?
+src/core_engine/ruleValidator.ts(147,17): error TS2353: Object literal may only specify known properties, and 'appliedRulePackId' does not exist in type 'JournalEntry'.
