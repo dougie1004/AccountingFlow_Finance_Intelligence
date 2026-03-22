@@ -11,36 +11,23 @@ interface AccountBalance {
 }
 
 const TrialBalance: React.FC = () => {
-    const { subLedger } = useAccounting();
+    const { subLedger, selectedDate, trialBalance } = useAccounting();
+    const [drillDownAccount, setDrillDownAccount] = React.useState<string | null>(null);
 
     const balances = useMemo(() => {
-        const map = new Map<string, { debit: number; credit: number }>();
-
-        subLedger.forEach(entry => {
-            // Debit side
-            const dVal = map.get(entry.debitAccount) || { debit: 0, credit: 0 };
-            map.set(entry.debitAccount, { ...dVal, debit: dVal.debit + entry.amount });
-
-            // Credit side
-            const cVal = map.get(entry.creditAccount) || { debit: 0, credit: 0 };
-            map.set(entry.creditAccount, { ...cVal, credit: cVal.credit + entry.amount });
-        });
-
-        const sortedAccounts = Array.from(map.keys()).sort();
+        const sortedAccounts = Object.keys(trialBalance).sort();
 
         return sortedAccounts.map(name => {
-            const { debit, credit } = map.get(name)!;
-            const debitBalance = debit > credit ? debit - credit : 0;
-            const creditBalance = credit > debit ? credit - debit : 0;
+            const entry = trialBalance[name];
             return {
                 accountName: name,
-                debitTotal: debit,
-                creditTotal: credit,
-                debitBalance,
-                creditBalance
+                debitTotal: entry.openingDebit + entry.movementDebit,
+                creditTotal: entry.openingCredit + entry.movementCredit,
+                debitBalance: entry.closingDebit,
+                creditBalance: entry.closingCredit
             };
         });
-    }, [subLedger]);
+    }, [trialBalance]);
 
     const totals = useMemo(() => {
         return balances.reduce((acc, curr) => ({
@@ -139,7 +126,11 @@ const TrialBalance: React.FC = () => {
                                 </tr>
                             ) : (
                                 balances.map((row) => (
-                                    <tr key={row.accountName} className="hover:bg-white/[0.02] transition-colors group">
+                                    <tr 
+                                        key={row.accountName} 
+                                        onClick={() => setDrillDownAccount(row.accountName)}
+                                        className="hover:bg-white/[0.02] transition-colors group cursor-pointer"
+                                    >
                                         <td className="px-8 py-6 text-sm font-black text-slate-400 text-right font-mono">
                                             {row.debitTotal > 0 ? row.debitTotal.toLocaleString() : '-'}
                                         </td>
@@ -148,7 +139,7 @@ const TrialBalance: React.FC = () => {
                                         </td>
                                         <td className="px-8 py-6 text-center">
                                             <div className="flex flex-col items-center">
-                                                <span className="font-black text-white group-hover:text-indigo-400 transition-colors uppercase tracking-tight">{row.accountName}</span>
+                                                <span className="font-black text-white group-hover:text-indigo-400 transition-colors uppercase tracking-tight underline decoration-indigo-500/30 underline-offset-4">{row.accountName}</span>
                                                 <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Master Account</span>
                                             </div>
                                         </td>
@@ -199,6 +190,48 @@ const TrialBalance: React.FC = () => {
                     </p>
                 </div>
             </div>
+
+            {/* TB Drill Down Modal - Simply audit the entries for this account */}
+            {drillDownAccount && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+                    <div className="bg-[#151D2E] w-full max-w-4xl max-h-[80vh] rounded-[3rem] border border-white/10 shadow-3xl overflow-hidden flex flex-col">
+                        <div className="p-8 border-b border-white/5 flex justify-between items-center bg-indigo-600/10">
+                            <div>
+                                <h3 className="text-2xl font-black text-white tracking-tight">{drillDownAccount} 상세 내역</h3>
+                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">Audit Trail: {selectedDate} 기준</p>
+                            </div>
+                            <button 
+                                onClick={() => setDrillDownAccount(null)}
+                                className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-8">
+                            <table className="w-full">
+                                <thead>
+                                    <tr className="text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-white/5">
+                                        <th className="px-4 py-4 text-left">일자</th>
+                                        <th className="px-4 py-4 text-left">적요</th>
+                                        <th className="px-4 py-4 text-right">차변(DR)</th>
+                                        <th className="px-4 py-4 text-right">대변(CR)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {subLedger.filter(e => e.account === drillDownAccount).map((e, i) => (
+                                        <tr key={i} className="border-b border-white/[0.02] hover:bg-white/[0.01]">
+                                            <td className="px-4 py-5 text-xs font-mono text-slate-400">{e.date}</td>
+                                            <td className="px-4 py-5 text-sm font-bold text-white">{e.description}</td>
+                                            <td className="px-4 py-5 text-right font-mono text-indigo-400">{e.debit > 0 ? e.debit.toLocaleString() : '-'}</td>
+                                            <td className="px-4 py-5 text-right font-mono text-rose-400">{e.credit > 0 ? e.credit.toLocaleString() : '-'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

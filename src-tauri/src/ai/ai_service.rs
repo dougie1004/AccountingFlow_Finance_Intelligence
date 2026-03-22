@@ -137,7 +137,7 @@ pub async fn call_journal_ai(
         }
     };
 
-    parsed.audit_trail.push(format!("[{}] {} (Advanced) 분석 완료", chrono::Local::now().format("%H:%M:%S"), model_name));
+    parsed.audit_trail.push(format!("[{}] Cognitive Ledger Agent (Pro) 분석 완료", chrono::Local::now().format("%H:%M:%S")));
     println!("[AI Service] Successfully parsed AI response for: {}", parsed.description.as_deref().unwrap_or("Unknown"));
 
     // STEP 3: 사용량 기록
@@ -268,7 +268,7 @@ JSON 응답 형식:
     let mut parsed: ParsedTransaction = serde_json::from_str(&text)
         .map_err(|e| format!("JSON 변환 실패: {} | 원문: {}", e, text))?;
 
-    parsed.audit_trail.push(format!("[{}] {} (Vision) 시각 분석 완료", chrono::Local::now().format("%H:%M:%S"), model_name));
+    parsed.audit_trail.push(format!("[{}] Cognitive Vision Agent (Pro) 시각 분석 완료", chrono::Local::now().format("%H:%M:%S")));
 
     // 사용량 기록
     crate::core::quota_manager::QUOTA_MANAGER.record_usage("default", 0.00002);
@@ -374,13 +374,21 @@ pub async fn consult_compliance_ai(
     };
 
     let prompt = format!(
-        r#"당신은 숙련된 회계 전문가이자 기업 경영 컨설턴트입니다. 사용자의 회계/세무 관련 질문에 답변하고 최선의 회계 처리를 제안하세요. 
-답변은 전문적이며 친절한 한글로 작성하세요.
+        r#"[Role: Senior AI CFO & Management Consultant]
+당신은 대한민국 기업의 회계 전문가이자 경영 컨설턴트입니다. 
+제공된 [재무 컨텍스트]와 [장부 데이터]를 실시간으로 분석하여 사용자의 질문에 답변하세요.
 
-[사용자 상황]: {}
-[회사의 회계 정책]: {}
+1. 데이터 활용 원칙:
+   - 질문이 모호하더라도 제공된 월별 매출/비용 추이와 최근 전표 내역을 바탕으로 최대한 구체적인 숫자(원 단위 등)를 언급하며 답변하세요.
+   - "정보가 부족하다"는 답변은 지양하고, 현재 있는 데이터 내에서 최선의 추정치와 분석을 제공하세요.
 
-[질문]: {}
+2. 전문성 및 톤앤매너:
+   - 답변은 전문적이며 신뢰감 있는 한글로 작성하세요.
+   - 필요시 향후 리스크나 경영 제언을 덧붙이세요.
+
+[재무 상황 및 질문]: {}
+[추가 전표 컨텍스트]: {}
+[회사의 특정 회계 정책]: {}
 
 반드시 다음 JSON 형식으로 응답하세요:
 {{
@@ -394,7 +402,7 @@ pub async fn consult_compliance_ai(
   }}
 }}
 "#,
-        tx_context, policy, user_message
+        user_message, tx_context, policy
     );
 
     let client = reqwest::Client::new();
@@ -427,4 +435,62 @@ pub async fn consult_compliance_ai(
     }
     
     Ok(res)
+}
+
+pub async fn train_knowledge_from_media(bytes: Vec<u8>, mime: &str) -> Result<String, String> {
+    let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY missing".to_string())?;
+    let model_name = get_ai_model();
+
+    let base64_data = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, bytes);
+    let mime_type = match mime {
+        "pdf" => "application/pdf",
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        _ => "application/pdf",
+    };
+
+    let prompt = r#"[Role: AI Knowledge Architect]
+당신은 기업의 비정형 문서(계약서, 규정집, 공문 등)를 분석하여 지식 베이스(Knowledge Base)에 저장할 수 있도록 핵심 요약을 만드는 전문가입니다.
+
+제공된 문서를 분석하여 다음 원칙에 따라 요약본을 작성하세요:
+1. **전문성**: 법률적, 회계적 핵심 조항(예: 이율, 정산 주기, 위약금, 공제 여부 등)을 누락 없이 포함하세요.
+2. **간결성**: AI 비서가 나중에 참고하기 좋게 불필요한 서술은 빼고 항목별로 정리하세요.
+3. **언어**: 반드시 한국어로 작성하세요.
+
+출력 형식:
+---
+[DOCUMENT: 문서 제목 또는 성격]
+- 핵심 내용 1: ...
+- 핵심 내용 2: ...
+- 특이 사항: ...
+---"#;
+
+    let client = reqwest::Client::new();
+    let body = json!({
+        "contents": [{
+            "parts": [
+                { "text": prompt },
+                { "inline_data": { "mime_type": mime_type, "data": base64_data } }
+            ]
+        }]
+    });
+
+    let response = client
+        .post(format!("https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}", model_name, api_key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Knowledge training error: {}", e))?;
+
+    let json_res: serde_json::Value = response.json().await.map_err(|e| format!("Parsing error: {}", e))?;
+    let text = json_res["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .ok_or("Failed to extract text from document")?
+        .trim()
+        .to_string();
+
+    // Record usage (Knowledge training is 2x standard cost)
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage("default", 0.00005);
+
+    Ok(text)
 }

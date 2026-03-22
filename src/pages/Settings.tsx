@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Database, Beaker, CheckCircle, AlertCircle, Lock, Calendar } from 'lucide-react';
 import { useAccounting } from '../hooks/useAccounting';
-import { generateSystemWideMockData, simulateAIParsing } from '../utils/mockDataGenerator';
+import { generateSystemWideMockData, simulateAIParsing } from '../core/simulation/journalGenerator';
 import { invoke } from '@tauri-apps/api/core';
 import { SetupWizard } from '../components/onboarding/SetupWizard';
 import { EntityMetadata, TaxPolicy } from '../types';

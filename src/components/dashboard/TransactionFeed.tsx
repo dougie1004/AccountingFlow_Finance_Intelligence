@@ -53,8 +53,8 @@ export const TransactionFeed: React.FC<TransactionFeedProps> = ({ onConfirm }) =
         if (!analysis || !analysis.transaction) return;
         const { transaction, vendorStatus, suggestedVendor, complianceReview } = analysis;
 
-        let debitAccount = '계정 미지정';
-        let creditAccount = '계정 미지정';
+        let debitAccount = '계정 분류 대기 중';
+        let creditAccount = '계정 분류 대기 중';
 
         switch (transaction.entryType) {
             case 'Expense':
@@ -252,7 +252,7 @@ export const TransactionFeed: React.FC<TransactionFeedProps> = ({ onConfirm }) =
                                 </div>
                                 <div className="text-right">
                                     <p className="text-[10px] font-black text-slate-500 uppercase mb-1">Vendor</p>
-                                    <p className="text-lg font-black text-indigo-400">{analysis.transaction?.vendor || '내부거래'}</p>
+                                    <p className="text-lg font-black text-indigo-400">{analysis.transaction?.vendor || '거래처 분류 대기 중'}</p>
                                 </div>
                                 <div className="col-span-2 py-4 bg-[#0B1221]/50 rounded-2xl border border-white/5 px-4 italic text-slate-300 font-bold">
                                     "{analysis.transaction?.description}"

@@ -9,13 +9,40 @@ pub mod inventory;
 pub mod utils;
 
 mod commands;
+mod scenario_manager;
+
+fn load_env_from_parent() {
+    let paths = vec!["../.env", ".env"];
+    for path in paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            println!("[Antigravity] Found .env file at: {}", path);
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') { continue; }
+                if let Some((key, value)) = line.split_once('=') {
+                    let key = key.trim();
+                    let value = value.trim().trim_matches('"').trim_matches('\'');
+                    std::env::set_var(key, value);
+                    
+                    // Bridge VITE_ prefixed keys for backend compatibility
+                    if key == "VITE_GEMINI_API_KEY" && std::env::var("GEMINI_API_KEY").is_err() {
+                        std::env::set_var("GEMINI_API_KEY", value);
+                    }
+                }
+            }
+        } else {
+            println!("[Antigravity] No .env file found at: {}", path);
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // [Security] API key must be set via .env file as GEMINI_API_KEY.
-    // Never hardcode API keys in source code.
+    // [Antigravity] Securely link project .env to Rust runtime
+    load_env_from_parent();
+
     if std::env::var("GEMINI_API_KEY").is_err() {
-        println!("[Warning] GEMINI_API_KEY is not set. AI features will be unavailable. Please configure src-tauri/.env");
+        println!("[Warning] GEMINI_API_KEY is not set. AI features will be unavailable. Please check project root .env");
     }
 
     tauri::Builder::default()
@@ -68,7 +95,11 @@ pub fn run() {
             commands::ai_suggest_risk_score,
             commands::generate_audit_priorities,
             commands::get_all_scenarios,
-            commands::ask_ai_assistant
+            commands::ask_ai_assistant,
+            commands::train_knowledge_from_file,
+            commands::generate_close_readiness_report,
+            scenario_manager::debug_echo_journals,
+            crate::core::strategic::cap_table_service::simulate_cap_table_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

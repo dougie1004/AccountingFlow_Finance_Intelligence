@@ -163,7 +163,7 @@ const Partners = () => {
                                                 </div>
                                                 <div className="flex flex-col">
                                                     <span className="font-black text-white group-hover:text-indigo-400 transition-colors uppercase tracking-tight">{partner.name}</span>
-                                                    <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">{partner.representative || '대표자 미지정'}</span>
+                                                    <p className="text-sm font-black text-slate-200">{partner.representative || '대표자 분류 대기 중'}</p>
                                                 </div>
                                             </div>
                                         </td>

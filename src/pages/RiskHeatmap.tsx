@@ -91,7 +91,7 @@ const CustomTooltip = ({ active, payload }: any) => {
                         </div>
                     </div>
                     <div className="mt-3 flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-slate-600 italic">
-                        <History size={12} /> Last Audit: {data.last_audit_year}년
+                        <History size={12} /> 최종 검증: {data.last_audit_year}년
                     </div>
                 </div>
             </div>
@@ -267,9 +267,9 @@ export default function RiskHeatmap() {
                     <div className="animate-in slide-in-from-left duration-700">
                         <div className="flex items-center gap-2 mb-3">
                             <Target className="text-blue-500 w-5 h-5 shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Risk-Based Audit Strategy</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Risk-Based Integrity Strategy</span>
                         </div>
-                        <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic">Audit Universe <span className="text-blue-500">Risk Heatmap</span></h1>
+                        <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic">Risk Universe <span className="text-blue-500">Heatmap</span></h1>
                         <p className="text-slate-500 font-medium mt-3 max-w-3xl leading-relaxed text-lg">
                             시스템 외부에서 일어나는 비공식 '그림자 프로세스'와 담당자 로컬 데이터, 전사 로그를 AI가 상시 분석하여 <strong className="text-rose-500 font-black">감사 우선순위</strong>가 높은 고위험 영역을 식별합니다.
                         </p>
@@ -281,7 +281,7 @@ export default function RiskHeatmap() {
                                 <div className="flex items-center gap-2">
                                     <div className={`w-2 h-2 rounded-full ${useLiveAi ? 'bg-blue-500 animate-pulse' : 'bg-slate-700'}`} />
                                     <span className={`text-[10px] font-black uppercase tracking-tight ${useLiveAi ? 'text-blue-400' : 'text-slate-600'}`}>
-                                        {useLiveAi ? 'GEMINI 3.0 ACTIVE' : 'LOCAL SIMULATOR'}
+                                        {useLiveAi ? 'COGNITIVE ENGINE ACTIVE' : 'LOCAL SIMULATOR'}
                                     </span>
                                 </div>
                             </div>
@@ -332,7 +332,7 @@ export default function RiskHeatmap() {
                         <div className="h-[550px] w-full relative bg-slate-900/40 rounded-[40px] border border-white/5 p-6 backdrop-blur-sm">
                             {/* Static Quadrant Labels in Corners */}
                             <div className="absolute top-10 right-10 text-right pointer-events-none z-20">
-                                <span className="inline-block text-[11px] font-black text-rose-500 uppercase tracking-widest bg-rose-500/10 backdrop-blur-md px-4 py-2 rounded-xl border border-rose-500/20 shadow-lg mb-2">Zone 1: Must Audit</span>
+                                <span className="inline-block text-[11px] font-black text-rose-500 uppercase tracking-widest bg-rose-500/10 backdrop-blur-md px-4 py-2 rounded-xl border border-rose-500/20 shadow-lg mb-2">Zone 1: 집중 검증 대상 (High Risk)</span>
                                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-tight max-w-[160px] leading-relaxed">High Exposure / Immediate Action Required</p>
                             </div>
                             <div className="absolute top-10 left-16 text-left pointer-events-none z-20">

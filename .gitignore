@@ -21,9 +21,16 @@ Thumbs.db
 
 # Logs and temporary files
 *.log
+*.txt
+*.log.*
 build_log.txt
 cargo_errors.txt
 commands_view.txt
+tmp/
+playwright-report/
+test-results/
+AccountingFlow_Latest.exe
+AccountingFlow_Setup.exe
 
 # Generated assets and temporary scripts
 app-logo.png

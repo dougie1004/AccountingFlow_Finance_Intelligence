@@ -1,404 +1,437 @@
-import React, { useMemo, useState } from 'react';
-import { useAccounting } from '../hooks/useAccounting';
-import {
-    TrendingUp,
-    CreditCard,
+import React, { useState, useMemo, useEffect, useContext } from 'react';
+import { 
+    TrendingUp, 
+    TrendingDown, 
+    Wallet, 
+    Activity, 
+    Zap, 
+    ShieldCheck, 
     Calendar,
-    ArrowUpRight,
-    Activity,
-    Wallet,
-    Play,
-    ShieldCheck,
-    Terminal,
-    Zap,
-    HelpCircle,
     Target,
-    AlertTriangle,
-    CheckCircle2,
-    AlertCircle,
-    X,
-    ExternalLink
+    Lock,
+    HelpCircle,
+    ArrowUpRight,
+    ChevronRight,
+    Info,
+    HelpCircle as HelpIcon,
+    Table,
+    Calculator as CalcIcon,
+    RefreshCw, // Added RefreshCw icon
+    ArrowUp // Added ArrowUp icon
 } from 'lucide-react';
-import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-    BarChart, Bar
-} from 'recharts';
-import { RecentTransactions } from '../components/dashboard/RecentTransactions';
-import { AIForecastPanel } from '../components/dashboard/AIForecastPanel';
-import { ManagementReportPanel } from '../components/dashboard/ManagementReportPanel';
-import { CFOReportCard } from '../components/dashboard/CFOReportCard';
-import { CEOQuickBar } from '../components/dashboard/CEOQuickBar';
-import { Tooltip } from '../components/common/Tooltip';
-import { generateSystemWideMockData } from '../utils/mockDataGenerator';
-import { formatCLevel } from '../utils/formatUtils';
+import { MetricRegistry } from '../core/reporting/metricRegistry';
+import { ExplainableKPI } from '../components/shared/ExplainableKPI';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useAccounting } from '../hooks/useAccounting';
+import { generateMultiYearSimulation } from '../core/simulation/journalGenerator';
+import { SCENARIO_CONFIGS } from '../core/simulation/scenarioConfigs';
+import { resolveARPU, resolveMarketing } from '../core/engine/scenarioResolver';
+import { generateDashboardReport } from '../core/reporting/dashboardReporter';
+import { IntegrityBadge } from '../components/dashboard/IntegrityBadge';
+import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 
-export const Dashboard: React.FC<{ setTab: (tab: string) => void }> = ({ setTab }) => {
-    const { ledger, financials, config, resetData, loadSimulation } = useAccounting();
-
-    // Layout stability fix for Recharts
-    const [isMounted, setIsMounted] = useState(false);
-    React.useEffect(() => {
-        setIsMounted(true);
-    }, []);
-
+export const Dashboard = () => {
+    const { 
+        ledger, trialBalance, accountingLedger, subLedger, 
+        selectedDate, setSelectedDate, setTab, 
+        loadSimulation, financials, isDev, scenarioResults
+    } = useAccounting();
+    const [selectedScenario, setSelectedScenario] = useState<'SURVIVAL' | 'STANDARD' | 'GROWTH'>('STANDARD');
     const [isSimulating, setIsSimulating] = useState(false);
-    const [isDemoMode, setIsDemoMode] = useState(false);
-    const [activeModal, setActiveModal] = useState<'runway' | 'concentration' | null>(null);
+    const [showDatePicker, setShowDatePicker] = useState(false);
 
-    const handleRunSimulation = () => {
-        const results = generateSystemWideMockData();
-        loadSimulation(results);
+    // Simulation Parameters based on SURVIVAL/STANDARD/GROWTH
+    const scenarioMetaData = {
+        'SURVIVAL': { title: '생존 우선 (Survival)', desc: '보수적 지출 및 마진 최적화 중심', color: 'text-amber-400', bg: 'bg-amber-500/10' },
+        'STANDARD': { title: '표준 성장 (Standard)', desc: '시장 평균 가이드라인 준행', color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+        'GROWTH':   { title: '공격 전개 (Growth)', desc: '점유율 확보를 위한 공격적 마케팅', color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
     };
 
-    const toggleDemoMode = () => {
-        if (!isDemoMode) {
-            handleRunSimulation();
-        } else {
-            resetData();
+    // Simulation logic is handled globally in AccountingContext
+
+    const handleRunSimulation = async (years: number[]) => {
+        setIsSimulating(true);
+        // Using the multi-year generator with the selected scenario
+        const result = generateMultiYearSimulation(years, SCENARIO_CONFIGS[selectedScenario]);
+        loadSimulation(result);
+
+        // Auto-adjust date to view the projected results
+        if (years.length > 0) {
+            const lastYear = years[years.length - 1];
+            setSelectedDate(`${lastYear}-12-31`);
         }
-        setIsDemoMode(!isDemoMode);
+
+        setTimeout(() => setIsSimulating(false), 800);
     };
 
-    // 1. Real-time Aggregation Logic
+    const handleScenarioChange = (scenario: 'SURVIVAL' | 'STANDARD' | 'GROWTH') => {
+        setSelectedScenario(scenario);
+        // Removed auto-run of simulation upon scenario card click to prevent unintentional ledger overwrites
+    };
+
     const analytics = useMemo(() => {
-        const today = new Date();
-        const past6MonthsKeys: string[] = [];
-        const monthlyData: Record<string, { income: number; expense: number }> = {};
-
-        for (let i = 5; i >= 0; i--) {
-            const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-            past6MonthsKeys.push(key);
-            monthlyData[key] = { income: 0, expense: 0 };
-        }
-
-        ledger.forEach(entry => {
-            const date = new Date(entry.date);
-            const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-            if (monthlyData[key]) {
-                if (entry.type === 'Revenue') monthlyData[key].income += entry.amount;
-                if (entry.type === 'Expense' || entry.type === 'Payroll') monthlyData[key].expense += entry.amount;
-            }
-        });
-
-        const cashFlowData = past6MonthsKeys.map(key => {
-            const [year, month] = key.split('-');
-            const label = `${year.slice(2)}년 ${parseInt(month)}월`;
-            return {
-                name: label,
-                income: monthlyData[key].income,
-                expense: monthlyData[key].expense
-            };
-        });
-
-        let rndAssetValue = 0;
-        let stockOptionExpense = 0;
-        let fxGainLoss = 0;
-        let fxExposure = 0;
-
-        ledger.forEach(e => {
-            if (e.description.includes('[R&D]')) rndAssetValue += e.amount;
-            if (e.description.includes('Stock Option')) stockOptionExpense += e.amount;
-            if (e.description.includes('FX') || e.vendor === 'Forex') {
-                fxGainLoss += (e.amount * 0.05);
-                fxExposure += e.amount;
-            }
-        });
-
-        const estimatedTaxCredit = rndAssetValue * 0.25;
-        const totalRevenueLast3m = cashFlowData.slice(-3).reduce((sum, d) => sum + d.income, 0);
-        const totalExpenseLast3m = cashFlowData.slice(-3).reduce((sum, d) => sum + d.expense, 0);
-        const averageMonthlyBurn = totalExpenseLast3m / Math.min(3, cashFlowData.length || 1);
-        const averageMonthlyRevenue = totalRevenueLast3m / Math.min(3, cashFlowData.length || 1);
-
-        const isProfitable = averageMonthlyRevenue > 0 && averageMonthlyRevenue >= averageMonthlyBurn;
-        const hasActivity = ledger.length > 0;
-
+        const report = generateDashboardReport(ledger, selectedDate);
         return {
-            cashFlowData,
-            totalRndInvestment: rndAssetValue,
-            stockOptionExpense,
-            fxGainLoss,
-            fxExposure,
-            estimatedTaxCredit,
-            averageMonthlyBurn,
-            averageMonthlyRevenue,
-            isProfitable,
-            hasActivity
+            ...report,
+            hasActivity: ledger.length > 0
         };
-    }, [ledger]);
+    }, [ledger, selectedDate]);
 
-    const runwayMonths = analytics.averageMonthlyBurn > 0 ? (financials?.realAvailableCash || 0) / analytics.averageMonthlyBurn : 0;
+    const metricResults = useMemo(() => {
+        if (!trialBalance) return null;
+        const liquidCash = MetricRegistry.calculateLiquidCash(trialBalance);
+        const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
+        
+        const ytStart = `${selectedDate.split('-')[0]}-01-01`;
+        const cashDelta = MetricRegistry.calculateCashDelta(ledger, ytStart, selectedDate);
 
-    const briefing = useMemo(() => {
-        if (!analytics.hasActivity) {
-            return {
-                status: 'READY',
-                cashText: `₩${(financials?.realAvailableCash || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-                schedule: "데이터 연동 대기 중",
-                message: "현재 분석할 경영 데이터가 존재하지 않습니다. 전표 데이터 또는 시뮬레이션 데이터셋을 가동하여 분석을 시작하십시오."
-            };
+        return { liquidCash, actualNetProfit, cashDelta };
+    }, [trialBalance, ledger, selectedDate]);
+
+    const projectedAnalytics = useMemo(() => {
+        const cfg = SCENARIO_CONFIGS[selectedScenario];
+        
+        // Dynamic ARPU extraction from ledger
+        let latestUsers = 0;
+        const revEntries = ledger.filter(e => e.description.includes('유저:'));
+        if (revEntries.length > 0) {
+            const lastEntry = revEntries[revEntries.length - 1];
+            const match = lastEntry.description.match(/유저: (\d+)명/);
+            if (match) latestUsers = parseInt(match[1]);
         }
 
-        const runway = analytics.isProfitable ? 999 : (runwayMonths || 24);
+        // Get actual monthly revenue to verify ARPU
+        const arpuVal = resolveARPU(new Date(selectedDate), cfg);
+        const currentArpu = latestUsers > 0 && analytics.operatingRevenue > 0 
+            ? (analytics.operatingRevenue / (latestUsers || 1)) 
+            : arpuVal;
 
-        let status = 'CRITICAL';
-        let message = "유동성 위기 단계입니다. 즉각적인 비용 절감 및 자금 조달 전략이 시급합니다.";
-
-        if (analytics.isProfitable) {
-            status = 'GROWTH';
-            message = "안정적인 흑자 구조를 유지하고 있습니다. 잉여 현금 흐름을 통한 투자 전략 수립을 권장합니다.";
-        } else if (runway >= 12) {
-            status = 'STABLE';
-            message = "자금 흐름이 안정적입니다. 장기적인 투자 및 재무 전략 추진이 가능합니다.";
-        } else if (runway >= 6) {
-            status = 'MONITOR';
-            message = "현금 흐름 모니터링이 필요한 구간입니다. 고정비 지출 속도를 조절하십시오.";
-        }
-
+        // Dynamic CAC estimation (Marketing Spend / Growth)
+        // For simplicity in this metric, we use the scenario's CAC baseline but adjusted by current efficiency
+        const marketingBudget = resolveMarketing(new Date(selectedDate), cfg);
+        const baseCac = marketingBudget > 10000000 ? 150000 : (marketingBudget > 4000000 ? 80000 : 40000);
+        
+        // LTV Calculation: (ARPU - VariableCost) / Churn
+        // Using scenario churn and variable cost per user as we don't have those in ledger
+        const varCost = cfg.unitEconomics.variableCostPerUser;
+        const churn = cfg.userModel.baseChurn;
+        
         return {
-            status,
-            cashText: `₩${(financials?.realAvailableCash || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-            schedule: "금일 실시간 전표 처리: 정상 가동 중",
-            message
+            quickRatioCash: analytics.currentCash + (SCENARIO_CONFIGS[selectedScenario].bridgeCapital || 0)
         };
-    }, [financials, analytics, runwayMonths]);
-
-    const kpiCards = [
-        { label: '현금 및 현금성 자산', description: 'BS 상의 총 현금 및 예금 계정 잔액 합계입니다.', value: financials?.cash || 0, icon: Wallet, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-        { label: '매출채권 (AR)', description: '발생주의 기준 매출 중 아직 현금으로 회수되지 않은 미수금 총액입니다.', value: financials?.ar || 0, icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-        { label: '매입채무 (AP)', description: '확정된 비용 중 아직 지급되지 않은 채무이며, 상환 시 가용한 자금이 감소합니다.', value: financials?.ap || 0, icon: CreditCard, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-        { label: '현금 연소율 (Burn Rate)', description: '최근 3개월간의 평균 월간 현금 유출액으로, 런웨이 분석의 핵심 지표입니다.', value: analytics.averageMonthlyBurn, icon: Activity, color: 'text-indigo-400', bg: 'bg-indigo-500/10' }
-    ];
+    }, [analytics.currentCash, analytics.operatingRevenue, ledger, selectedScenario, scenarioResults]);
 
     return (
-        <div className="flex-1 bg-[#0B1221] space-y-6 animate-in fade-in duration-500 pb-12">
-            <header className="flex flex-col xl:flex-row xl:items-start justify-between gap-6 pb-2 border-b border-white/5">
-                <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg">
-                            <Activity size={24} />
-                        </div>
-                        <h1 className="text-2xl font-bold text-white tracking-tight">경영 관리 대시보드</h1>
-                    </div>
-                    <p className="text-slate-400 font-bold mt-1 ml-1 text-xs uppercase tracking-wider">Enterprise Financial Controller Console</p>
+        <div className="flex-1 bg-[#0B1221] space-y-8 animate-in fade-in duration-500 pb-12 px-8 overflow-y-auto custom-scrollbar h-screen">
+            {/* Premium Header Section */}
+            <header className="flex flex-col gap-6 mt-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <IntegrityBadge ledger={ledger} accountingLedger={subLedger} trialBalance={trialBalance} financials={financials} reportingDate={selectedDate} />
                 </div>
 
-                <div className="flex flex-col items-end gap-2">
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase">SCENARIO MODE:</span>
-                        <div className="flex gap-1">
-                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-[#8B5CF6]/20 text-[#8B5CF6] border border-[#8B5CF6]/30">절약(LEAN/SURVIVAL)</button>
-                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-white/5 text-slate-400 hover:text-white">표준(GRANT)</button>
-                            <button className="px-3 py-1 rounded text-[10px] font-bold bg-white/5 text-slate-400 hover:text-white">공격(GROWTH)</button>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-indigo-600 rounded-2xl shadow-[0_0_20px_rgba(79,70,229,0.4)]">
+                            <Activity size={28} className="text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-3 italic">
+                                CFO COMMAND CENTER <span className="text-indigo-400 not-italic">/ DASHBOARD</span>
+                            </h1>
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                                <div className="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full w-fit">
+                                    <ShieldCheck size={14} className="text-indigo-500" />
+                                    <p className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                                        실시간 재무 원장이 통합 분석되고 있습니다.
+                                    </p>
+                                </div>
+                                <div className={`flex items-center gap-2 px-3 py-1 ${isDev ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-amber-500/10 border-amber-500/20'} border rounded-full w-fit`}>
+                                    {isDev ? <Zap size={12} className="text-indigo-400" /> : <Lock size={12} className="text-amber-500" />}
+                                    <p className={`${isDev ? 'text-indigo-400' : 'text-amber-400'} font-black text-xs uppercase tracking-widest italic`}>
+                                        {isDev ? 'Developer Access Active' : 'Read-Only Safety Mode'}
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div className="flex gap-2">
-                        <button onClick={() => setTab('strategic-compass')} className="px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white rounded-lg text-[10px] font-black tracking-widest uppercase transition-all shadow-lg flex items-center gap-2">
-                            <Play size={12} /> 3개년 시뮬레이션 RUN
-                        </button>
-                        <button
-                            onClick={toggleDemoMode}
-                            disabled={isSimulating}
-                            className={`px-4 py-2 rounded-lg text-[10px] font-black tracking-widest uppercase transition-all ${isDemoMode ? 'bg-[#1e293b] text-white border border-white/10 shadow-lg' : 'bg-[#151D2E] text-slate-400 border border-white/5'}`}
-                        >
-                            <Terminal size={12} className="inline mr-1" />
-                            {isDemoMode ? '시뮬레이션 가동 중' : '엔터프라이즈 데이터셋 로드'}
-                        </button>
+
+                        <div className="flex items-center gap-4">
+                            {isDev && (
+                                <button 
+                                    onClick={() => {
+                                        if(confirm("시스템의 모든 장부 데이터를 초기화합니까?")) {
+                                            const { resetData } = (window as any).useAccounting ? (window as any).useAccounting() : { resetData: () => {} };
+                                            if (typeof resetData === 'function') resetData();
+                                            else (window as any).resetData?.();
+                                        }
+                                    }}
+                                    className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-2xl text-xs font-black tracking-widest uppercase transition-all border border-rose-500/20"
+                                >
+                                    System Reset
+                                </button>
+                            )}
+                            <div className="flex items-center gap-2 bg-[#151D2E] px-4 py-2 rounded-2xl border border-white/5 shadow-xl">
+                                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">기준일:</span>
+                                <PremiumDatePicker value={selectedDate} onChange={setSelectedDate} />
+                            </div>
+                            <button 
+                                onClick={() => setTab('closing')}
+                                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-black tracking-widest uppercase transition-all shadow-xl shadow-emerald-600/20 flex items-center gap-2 border border-emerald-400/30"
+                            >
+                                <Lock size={14} /> 결산 실행
+                            </button>
+                        </div>
+                </div>
+
+                {/* Strategy & Command Bar */}
+                <div className="flex flex-col gap-4 p-6 bg-[#151D2E]/50 border border-white/5 rounded-[2.5rem] backdrop-blur-xl">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-3 px-4 py-2 bg-white/5 rounded-2xl border border-white/5">
+                                <span className="text-xs font-black text-slate-500 uppercase tracking-widest">SCENARIO MODE:</span>
+                                <div className={`flex gap-1.5 ${!isDev ? 'opacity-50 pointer-events-none cursor-not-allowed' : ''}`} title={!isDev ? "Scenario switching is disabled in Safety Mode" : ""}>
+                                    {(['SURVIVAL', 'STANDARD', 'GROWTH'] as const).map(mode => (
+                                        <button 
+                                            key={mode}
+                                            onClick={() => isDev && handleScenarioChange(mode)}
+                                            className={`px-4 py-1.5 rounded-xl text-xs font-black uppercase transition-all ${selectedScenario === mode ? 'bg-indigo-600 text-white shadow-lg' : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'}`}
+                                        >
+                                            {mode}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 bg-indigo-500/10 px-4 py-2 rounded-2xl border border-indigo-500/20">
+                                <span className="text-xs font-black text-indigo-400 uppercase tracking-widest italic">ACTIVE STRATEGY:</span>
+                                <span className="text-xs font-bold text-white uppercase">{scenarioMetaData[selectedScenario].title}</span>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={async () => {
+                                    if(isDev) {
+                                        console.log("[Dashboard] Triggering Full Simulation...");
+                                        await handleRunSimulation([2026, 2027, 2028]);
+                                    }
+                                }}
+                                className={`px-6 py-2 ${isDev ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 active:scale-95 transition-transform' : 'bg-indigo-600/20 text-indigo-400/50 cursor-not-allowed'} rounded-2xl text-xs font-black tracking-widest uppercase flex items-center gap-2 border ${isDev ? 'border-indigo-400/30' : 'border-indigo-500/10'}`}
+                            >
+                                {isDev ? (isSimulating ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} className="animate-pulse" />) : <Lock size={14} />}
+                                {isDev ? (isSimulating ? 'SIMULATING...' : 'RUN FULL SIMULATION') : 'SIMULATION LOCKED'}
+                            </button>
+                            <div className="flex bg-white/5 p-1 rounded-2xl border border-white/5 items-center">
+                                {[2026, 2027, 2028].map(y => (
+                                    <button 
+                                        key={y}
+                                        onClick={async () => {
+                                            if(isDev) {
+                                                const yearRange = Array.from({ length: y - 2026 + 1 }, (_, i) => 2026 + i);
+                                                await handleRunSimulation(yearRange);
+                                            }
+                                        }}
+                                        className={`px-4 py-2 rounded-xl text-xs font-black tracking-widest uppercase transition-all flex items-center gap-2 ${isDev ? 'hover:bg-white/5 text-slate-400 hover:text-white' : 'text-slate-600 cursor-not-allowed'}`}
+                                    >
+                                        <Target size={12} /> {y}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                    <button className="w-full mt-1 px-4 py-1.5 bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] font-black uppercase text-center flex items-center justify-center gap-2">
-                        <AlertCircle size={12} /> Risk Briefing (Phase 4.5)
-                    </button>
                 </div>
             </header>
 
-            <CEOQuickBar
-                financials={financials}
-                avgMonthlyBurn={analytics.averageMonthlyBurn}
-                isProfitable={analytics.isProfitable}
-                hasActivity={analytics.hasActivity}
-            />
-
-            {/* CFO Risk Snapshot */}
-            <div className="space-y-3">
-                <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
-                    <TrendingUp size={16} className="text-blue-400" />
-                    경영 밸런스 요약 (CFO Risk Snapshot)
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden group">
-                        <div className="flex justify-between items-start mb-2">
-                            <p className="text-xs font-bold text-slate-400">거래의 의존도</p>
-                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
-                                <CheckCircle2 size={10} /> STABLE
-                            </span>
-                        </div>
-                        <h4 className="text-2xl font-black text-white mb-2">0.0%</h4>
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                            상위 특정 거래처에 대한 의존도가 낮아 사업 안정성이 높습니다.
-                        </p>
-                    </div>
-                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-2">
-                            <p className="text-xs font-bold text-slate-400">이익 vs 현금 괴리율</p>
-                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
-                                <CheckCircle2 size={10} /> STABLE
-                            </span>
-                        </div>
-                        <h4 className="text-2xl font-black text-white mb-2">8.2%</h4>
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                            매출에 따른 현금 회수가 원활하게 진행되고 있습니다.
-                        </p>
-                    </div>
-                    <div className="bg-[#2A231E] border border-amber-500/30 p-5 rounded-2xl shadow-lg relative overflow-hidden cursor-pointer hover:bg-[#332A24] transition-colors" onClick={() => setActiveModal('runway')}>
-                        <div className="flex justify-between items-start mb-2">
-                            <p className="text-xs font-bold text-amber-500">RUNWAY</p>
-                            <span className={`px-2 py-0.5 ${runwayMonths < 6 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-amber-500/20 text-amber-500 border border-amber-500/30'} rounded text-[9px] font-bold flex items-center gap-1`}>
-                                <AlertTriangle size={10} /> {runwayMonths < 6 ? 'CRITICAL' : 'WATCH'}
-                            </span>
-                        </div>
-                        <h4 className="text-2xl font-black text-white mb-2">{runwayMonths.toFixed(1)}개월</h4>
-                        <p className="text-[10px] text-amber-500/70 leading-relaxed">
-                            {runwayMonths < 6 ? '유동성이 부족합니다. 지출 속도를 조절하거나 자본 확충이 필요합니다.' : '현금 흐름 모니터링이 필요합니다.'}
-                        </p>
-                    </div>
-                    <div className="bg-[#151D2E] p-5 rounded-2xl border border-white/5 shadow-lg relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-2">
-                            <p className="text-xs font-bold text-slate-400">자산 집중도</p>
-                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded text-[9px] font-bold flex items-center gap-1">
-                                <CheckCircle2 size={10} /> STABLE
-                            </span>
-                        </div>
-                        <h4 className="text-2xl font-black text-white mb-2">42.9%</h4>
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                            안전 자산 비율이 적정한 수준을 유지하고 있습니다.
-                        </p>
-                    </div>
+            {/* 메인 KPI 섹션 - 클릭 시 해당 메뉴로 이동 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+                <div onClick={() => setTab('monthly-pnl')} className="cursor-pointer">
+                    <ExplainableKPI 
+                        label="영업 매출액 (OP. REVENUE)" 
+                        result={{
+                            value: analytics.operatingRevenue,
+                            inputs: { '총 매출액': analytics.totalRevenue, '보조금 차감': analytics.grantIncome },
+                            formula: '총 매출액 - 보조금 수익',
+                            period: '당기 누적 (실측)',
+                            dataSource: 'actual'
+                        }}
+                        description="왜 보조금을 제외하나요? 보조금은 일회성 수익이며 사업의 본질적인 매력도를 왜곡할 수 있습니다. 보조금을 뺀 '순수 매출'이 수혈 없이 성장이 가능한지를 보여주는 진짜 지표입니다."
+                        color="text-emerald-400"
+                        icon={<TrendingUp size={16} />}
+                    />
+                </div>
+                <div onClick={() => setTab('settlement')} className="cursor-pointer">
+                    <ExplainableKPI 
+                        label="매출 대비 회수율 (AR VS CASH)" 
+                        result={{
+                            value: analytics.collectionRate,
+                            inputs: { '총 매출액': analytics.totalRevenue },
+                            formula: '(1 - 미수금 / 매출액) * 100',
+                            period: '당기 누적 (실측)',
+                            dataSource: 'actual'
+                        }}
+                        description="매출액 중에서 실제로 현금으로 회수된 비율입니다. 수익이 발생하더라도 현금이 돌지 않으면 흑자 도산의 위험이 있으므로 항상 주시해야 합니다."
+                        color={analytics.collectionRate < 80 ? 'text-rose-400' : 'text-emerald-400'}
+                        icon={<TrendingUp size={16} />}
+                        formatValue={(v) => `${v.toFixed(1)}%`}
+                    />
+                </div>
+                <div onClick={() => setTab('cashflow')} className="cursor-pointer">
+                    <ExplainableKPI 
+                        label="가용 현금 (LIQUID CASH)" 
+                        result={metricResults?.liquidCash || { value: 0, inputs: {}, formula: '', period: '', dataSource: 'actual' }}
+                        description="왜 미수금을 제외한 현금만 보나요? 회계상 수익이 났어도 통장에 돈이 없으면 부도가 날 수 있습니다. 즉시 집행 가능한 '현금'만이 위기 상황에서 회사를 지키는 방어선이기 때문입니다."
+                        color="text-blue-400"
+                        icon={<Wallet size={16} />}
+                    />
+                </div>
+                <div onClick={() => setTab('monthly-pnl')} className="cursor-pointer">
+                    <ExplainableKPI 
+                        label="순이익 (NET PROFIT)" 
+                        result={metricResults?.actualNetProfit || { value: 0, inputs: {}, formula: '', period: '', dataSource: 'actual' }}
+                        description="여기서는 왜 보조금을 포함하나요? 법인세 산정이나 투자 유치, 대출 시에는 보조금을 포함한 최종 순이익이 공식적인 성적표가 됩니다. 회사의 종합적인 재무 체력을 나타냅니다."
+                        color="text-indigo-400"
+                        icon={<Activity size={16} />}
+                    />
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 auto-rows-auto">
-                <div className="md:col-span-2 lg:col-span-4">
-                    <ManagementReportPanel ledger={ledger} />
-                </div>
-
-                <div className="lg:col-span-3 bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 flex flex-col h-[450px] shadow-2xl">
-                    <div className="flex justify-between items-center mb-8">
+            {/* 중단 가로 레이아웃: 추세 그래프 & 시나리오 요약 */}
+            <div className="grid grid-cols-1 gap-8">
+                <div className="bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl overflow-hidden group">
+                    <div className="flex items-center justify-between mb-8 px-2">
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-400">
                                 <TrendingUp size={24} />
                             </div>
-                            <h3 className="text-xl font-black text-white tracking-tight">최근 6개월 현금 흐름 추이 (Historical Cash Flow)</h3>
+                            <h3 className="text-xl font-black text-white tracking-tight italic uppercase">매출 및 비용 추세 <span className="text-slate-500 not-italic text-sm ml-2">({selectedScenario} Mode)</span></h3>
                         </div>
                     </div>
-                    <div className="flex-1 w-full min-w-0">
-                        {isMounted && (
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={analytics.cashFlowData}>
-                                    <defs>
-                                        <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                        </linearGradient>
-                                        <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
-                                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 700, fill: '#64748b' }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 700, fill: '#64748b' }} tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`} />
-                                    <RechartsTooltip
-                                        contentStyle={{ backgroundColor: '#1e293b', borderRadius: '16px', border: 'none' }}
-                                        formatter={(v: any) => `₩${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                                    />
-                                    <Area type="monotone" dataKey="income" stroke="#10b981" strokeWidth={4} fillOpacity={1} fill="url(#colorIncome)" />
-                                    <Area type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={4} fillOpacity={1} fill="url(#colorExpense)" />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        )}
-                    </div>
-                </div>
-
-                <div className="lg:col-span-1">
-                    <CFOReportCard
-                        metrics={analytics}
-                        onViewReport={() => setTab('reports')}
-                        certifications={{
-                            hasRDDept: config?.entityMetadata?.hasRDDept,
-                            hasRDLab: config?.entityMetadata?.hasRDLab
-                        }}
-                    />
-                </div>
-
-                <div className="md:col-span-2 lg:col-span-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {kpiCards.map((kpi, idx) => (
-                        <div key={idx} className="bg-[#151D2E] p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border border-white/5 hover:border-indigo-500/30 transition-all group overflow-hidden">
-                            <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl ${kpi.bg} ${kpi.color} flex items-center justify-center mb-6 group-hover:scale-110 transition-transform`}>
-                                <kpi.icon size={20} className="sm:size-6" />
-                            </div>
-                            <Tooltip key={kpi.label} content={kpi.description} position="top">
-                                <div className="p-2 -m-2 inline-block">
-                                    <p className="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 cursor-help flex items-center gap-1 border-b border-white/10 w-fit pointer-events-none">
-                                        {kpi.label} <HelpCircle size={10} className="text-slate-600" />
-                                    </p>
-                                </div>
-                            </Tooltip>
-                            <h4 className="text-xl sm:text-2xl lg:text-3xl font-black text-white tracking-tighter truncate">{formatCLevel(kpi.value)}</h4>
-                        </div>
-                    ))}
-                </div>
-
-                <div className="md:col-span-2 lg:col-span-4">
-                    <AIForecastPanel
-                        ledger={ledger}
-                        currentBalance={financials?.realAvailableCash || 0}
-                    />
-                </div>
-
-                <div className="md:col-span-2 lg:col-span-4 h-[400px]">
-                    <RecentTransactions
-                        transactions={ledger}
-                        onNavigate={setTab}
-                    />
-                </div>
-
-                <div className="md:col-span-2 lg:col-span-4">
-                    <div className="bg-[#151D2E] border border-white/5 p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] flex flex-col md:flex-row items-start md:items-center justify-between group hover:border-indigo-500/40 transition-all shadow-xl gap-6">
-                        <div className="flex items-start sm:items-center gap-4 sm:gap-6">
-                            <div className="p-3 sm:p-4 bg-indigo-600 rounded-xl sm:rounded-2xl shadow-xl shadow-indigo-600/20 group-hover:scale-110 transition-transform flex-shrink-0">
-                                <Activity className="text-white" size={24} />
-                            </div>
-                            <div className="space-y-1">
-                                <h3 className="text-lg sm:text-xl font-black text-white tracking-tight flex items-center gap-2 sm:gap-3 flex-wrap">
-                                    CFO Strategic Performance Report
-                                    <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-full ${['STABLE', 'GROWTH'].includes(briefing.status) ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
-                                        {briefing.status}
-                                    </span>
-                                </h3>
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-slate-300 text-xs sm:text-sm font-bold">
-                                    <Tooltip content="총 현금에서 확정 부채(AP, VAT) 및 사용 제한 보조금을 차감한, 경영진이 실질적으로 즉시 집행 가능한 자금입니다." position="top">
-                                        <span className="flex items-center gap-1 cursor-help border-b border-indigo-400/20"><Wallet size={12} className="text-indigo-400" /> 가용자금: {briefing.cashText} <HelpCircle size={10} className="text-indigo-500/50" /></span>
-                                    </Tooltip>
-                                    <span className="flex items-center gap-1"><Calendar size={12} className="text-indigo-400" /> {briefing.schedule}</span>
-                                </div>
-                                <p className="text-slate-400 font-bold text-xs sm:text-sm pt-2 leading-relaxed">
-                                    {briefing.message}
-                                </p>
-                            </div>
-                        </div>
-                        <div className="hidden lg:block">
-                            <button
-                                onClick={() => setTab?.('advanced-ledger')}
-                                className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-white font-black rounded-xl border border-white/10 transition-all active:scale-95"
-                            >
-                                상세 전략 모듈 가기 <ArrowUpRight size={18} />
-                            </button>
-                        </div>
+                    <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={analytics.cashFlowData}>
+                                <defs>
+                                    <linearGradient id="colorOperating" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorGrant" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorExpense" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
+                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={val => `${(val / 1000000).toFixed(0)}M`} />
+                                <RechartsTooltip 
+                                    contentStyle={{ backgroundColor: '#1e293b', border: 'none', borderRadius: '12px', padding: '12px' }} 
+                                    formatter={(value: any, name: any) => {
+                                        const labelMap: Record<string, string> = {
+                                            operatingIncome: '영업 매출',
+                                            grantIncome: '영업외 수익 (지원금)',
+                                            expense: '지출'
+                                        };
+                                        return [`₩${(value || 0).toLocaleString()}`, labelMap[name] || name];
+                                    }}
+                                />
+                                <Area stackId="1" type="monotone" dataKey="operatingIncome" name="operatingIncome" stroke="#10b981" fillOpacity={1} fill="url(#colorOperating)" />
+                                <Area stackId="1" type="monotone" dataKey="grantIncome" name="grantIncome" stroke="#3b82f6" fillOpacity={1} fill="url(#colorGrant)" />
+                                <Area type="monotone" dataKey="expense" name="expense" stroke="#ef4444" fillOpacity={1} fill="url(#colorExpense)" />
+                            </AreaChart>
+                        </ResponsiveContainer>
                     </div>
                 </div>
             </div>
+
         </div>
     );
 };
+
+const RiskIndicatorCard: React.FC<{ label: string, title: string, val: string, color: 'orange' | 'rose' | 'emerald', desc: string, onClick?: () => void }> = ({ label, title, val, color, desc, onClick }) => (
+    <div 
+        onClick={onClick}
+        className={`bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 flex flex-col justify-between shadow-2xl relative overflow-hidden group hover:border-indigo-500/30 transition-all cursor-pointer h-[240px]`}
+    >
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</p>
+                <div className={`px-2 py-0.5 rounded-full bg-${color === 'rose' ? 'rose' : color === 'orange' ? 'orange' : 'emerald'}-500/10 border border-${color === 'rose' ? 'rose' : color === 'orange' ? 'orange' : 'emerald'}-500/20 flex items-center gap-1.5`}>
+                    <div className={`w-1.5 h-1.5 rounded-full bg-${color === 'rose' ? 'rose' : color === 'orange' ? 'orange' : 'emerald'}-500 animate-pulse`} />
+                    <span className={`text-[9px] font-black text-${color === 'rose' ? 'rose' : color === 'orange' ? 'orange' : 'emerald'}-500 uppercase tracking-widest`}>{val}</span>
+                </div>
+            </div>
+            <h4 className="text-3xl font-black text-white tracking-tighter italic">{title}</h4>
+        </div>
+        <div className="flex justify-between items-end group-hover:translate-x-1 transition-transform">
+            <p className="text-[10px] font-medium text-slate-500 leading-relaxed max-w-[80%]">
+                {desc}
+            </p>
+            <ArrowUpRight className="text-slate-700 group-hover:text-indigo-400 transition-colors" size={16} />
+        </div>
+    </div>
+);
+
+const TooltipWrapper: React.FC<{ explanation?: string, children: React.ReactNode }> = ({ explanation, children }) => {
+    const [isHovered, setIsHovered] = useState(false);
+    return (
+        <div 
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            className="relative h-full"
+        >
+            {children}
+            <AnimatePresence>
+                {isHovered && explanation && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                        className="absolute bottom-full left-0 mb-4 w-72 p-5 bg-[#0B1221] border border-white/10 rounded-[2rem] shadow-3xl z-[100] pointer-events-none"
+                    >
+                        <p className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                             <Info size={14} /> Metric Insight
+                        </p>
+                        <p className="text-xs text-slate-400 leading-relaxed font-bold whitespace-normal italic">
+                            {explanation}
+                        </p>
+                        <div className="absolute -bottom-1.5 left-10 w-3 h-3 bg-[#0B1221] border-b border-r border-white/10 transform rotate-45" />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+const SummaryCard: React.FC<{ label: string, val: string, color: string, icon: any, sub?: string, explanation?: string, onClick?: () => void }> = ({ label, val, color, icon: Icon, sub, explanation, onClick }) => (
+    <TooltipWrapper explanation={explanation}>
+        <div 
+            onClick={onClick}
+            className="bg-[#151D2E]/80 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white/5 flex items-center justify-between shadow-xl group hover:-translate-y-1 transition-all cursor-pointer h-full"
+        >
+            <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                    <p className="text-sm font-black text-slate-500 uppercase tracking-widest leading-tight">{label}</p>
+                    <HelpIcon size={12} className="text-slate-700 group-hover:text-indigo-400 transition-colors" />
+                </div>
+                <h4 className={`text-3xl font-black tracking-tighter italic ${color}`}>{val}</h4>
+                {sub && <p className="text-xs font-black text-slate-600 uppercase tracking-tight italic">{sub}</p>}
+            </div>
+            <div className={`p-5 bg-white/5 rounded-2xl text-slate-700 group-hover:${color} transition-all`}>
+                <Icon size={24} />
+            </div>
+        </div>
+    </TooltipWrapper>
+);
+
+const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('ko-KR', {
+        style: 'currency',
+        currency: 'KRW',
+        maximumFractionDigits: 0
+    }).format(amount);
+};
+
+

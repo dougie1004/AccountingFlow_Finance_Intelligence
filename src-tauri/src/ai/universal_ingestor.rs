@@ -82,8 +82,8 @@ pub async fn ingest_universal_file(
             println!("[Universal Ingestor] Sending Media file to Vision AI (Extension: {})", extension);
             let mut ai_res = crate::ai::ai_service::extract_transaction_from_media(file_bytes, &extension).await?;
             
-            // Apply Local Rule Engine (Overrides AI if necessary)
-            crate::ai::rule_based_classifier::classify_by_rules(&mut ai_res);
+            // Apply Local Rule Engine (Suggestion Only)
+            ai_res.suggestion = crate::ai::rule_based_classifier::classify_by_rules(&ai_res);
             
             ai_res.audit_trail.push(source_info.clone());
             ai_res.reasoning.push_str(" | Vision Analysis + Local Rules");

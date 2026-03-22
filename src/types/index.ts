@@ -3,7 +3,7 @@
  * Mirror these in src-tauri/src/models.rs
  */
 
-export type EntryType = 'Expense' | 'Asset' | 'Revenue' | 'Liability' | 'Equity' | 'Payroll';
+export type EntryType = 'Expense' | 'Asset' | 'Revenue' | 'Liability' | 'Equity' | 'Payroll' | 'Funding' | 'Scenario';
 export type PartnerType = 'Vendor' | 'Customer' | 'Employee';
 
 export interface JournalEntry {
@@ -12,11 +12,15 @@ export interface JournalEntry {
     description: string;
     vendor?: string; // Optional - 거래처가 없을 수 있음
     debitAccount: string;
+    debitAccountId?: string;
     creditAccount: string;
+    creditAccountId?: string;
     amount: number;
     vat: number;
     type: EntryType;
-    status: 'Approved' | 'Unconfirmed' | 'Hold' | 'Pending Review';
+    status: 'Approved' | 'Unconfirmed' | 'Hold' | 'Pending Review' | 'blocked';
+    dueDate?: string;
+    matchingStatus?: 'matched' | 'unmatched';
     taxCode?: TaxCode;
 
     // [Integrity Engine V2] 
@@ -47,6 +51,25 @@ export interface JournalEntry {
     transactionGroupId?: string;
     employeeTags?: string[];
     isInsurancePart?: boolean;
+
+    // [Step 3] Simulation & Scenario
+    scope?: 'actual' | 'scenario' | 'future';
+
+    // [Edge Case] Multi-line (Complex) Entry
+    complexLines?: { account: string; accountId?: string; debit: number; credit: number }[];
+}
+
+export interface LedgerLine {
+    id: string; // Linked Journal Entry ID
+    date: string;
+    description: string;
+    account: string;
+    accountId?: string;
+    debit: number;
+    credit: number;
+    type: EntryType;
+    scope: 'actual' | 'scenario' | 'future';
+    vendor?: string; // [NEW] 거래처 정보 (거래처 원장용)
 }
 
 export type TaxCode =
@@ -97,7 +120,9 @@ export interface InventoryItem {
 
 export interface FinancialSummary {
     cash: number;
-    revenue: number;
+    revenue: number;        // Total Revenue (Operating + Grant)
+    operatingRevenue: number; // Pure Sales Revenue
+    grantRevenue: number;     // Voucher/Grant Revenue (Non-cash influence)
     expenses: number;
     ar: number;
     ap: number;
@@ -111,8 +136,39 @@ export interface FinancialSummary {
     totalAssets: number;
     totalLiabilities: number;
     realAvailableCash: number;
+    deltaAR: number;
+    deltaAP: number;
+    deltaInventory: number;
+    workingCapitalVariation: number;
     totalGrantCash: number;
 }
+
+export type AccountNature = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
+export type StatementType = 'BS' | 'PL';
+
+export interface AccountDefinition {
+    id: string; // [STRICT] Unique UUID for Account Identity
+    code: string;
+    name: string;
+    nature: AccountNature;
+    statement: StatementType;
+    section: string;
+    group: string;
+}
+
+export type AccountMetadata = AccountDefinition;
+
+export interface TrialBalanceItem {
+    openingDebit: number;
+    openingCredit: number;
+    movementDebit: number;
+    movementCredit: number;
+    closingDebit: number;
+    closingCredit: number;
+    meta: AccountMetadata;
+}
+
+export type TrialBalance = Record<string, TrialBalanceItem>;
 
 export interface OrderItem {
     sku: string;
@@ -193,6 +249,13 @@ export interface AuditSnapshot {
     adjustments: TaxAdjustment[];
 }
 
+export interface FundingEvent {
+    date: string;
+    amount: number;
+    preCash: number;
+    postCash: number;
+}
+
 export interface SimulationResult {
     ledger: JournalEntry[];
     assets: Asset[];
@@ -202,6 +265,7 @@ export interface SimulationResult {
     adjustments: TaxAdjustment[];
     validationResults: ValidationResult[];
     companyConfig: TenantConfig;
+    fundingEvents?: FundingEvent[];
 }
 
 export interface Partner {
@@ -222,6 +286,15 @@ export interface Partner {
 
 export type ParseStatus = 'ok' | 'warning' | 'needConfirm' | 'error';
 
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+
+export interface ClassificationSuggestion {
+    suggestedAccount?: string;
+    suggestedPaymentMethod?: string;
+    confidence: ConfidenceLevel;
+    reasoning: string;
+}
+
 /**
  * AI 분석 결과 (Rust에서 넘어오는 데이터)
  */
@@ -239,6 +312,8 @@ export interface ParsedTransaction {
     vendorAddress?: string;
     reasoning: string;
     accountName?: string;
+    isJournalMode?: boolean;
+    suggestion?: ClassificationSuggestion;
     needsClarification?: boolean;
     clarificationPrompt?: string;
     clarificationOptions?: string[];
@@ -335,6 +410,19 @@ export interface ManagementReport {
     assetInsights: AssetInsights;
 }
 
+export interface DashboardReport {
+    hasActivity: boolean;
+    totalRevenue: number;
+    operatingRevenue: number;
+    grantIncome: number;
+    currentCash: number;
+    currentNetProfit: number;
+    averageMonthlyBurn: number;
+    runwayMonths: number;
+    cashFlowData: { name: string; income: number; expense: number }[];
+    collectionRate: number;
+}
+
 export interface TaxEstimation {
     bookIncome: number;
     taxableIncome: number;
@@ -383,4 +471,33 @@ export interface DepreciationScheduleItem {
 export interface AssetSchedule {
     assetId: string;
     items: DepreciationScheduleItem[];
+}
+
+export interface ScenarioAssumption {
+    key: string;
+    value: number;
+    description: string;
+}
+
+export interface ScenarioDefinition {
+    id: string;
+    name: string;
+    baseSnapshotId: string;
+    createdAt: string;
+    assumptions: ScenarioAssumption[];
+}
+
+export interface MonthlyProjection {
+    month: string;
+    projectedBalance: number;
+    expectedRevenue: number;
+    expectedExpenses: number;
+    netCashFlow: number;
+}
+
+export interface MacroAssumptions {
+    inflationRate: number;      // e.g. 0.03 for 3%
+    wageGrowthRate: number;     // e.g. 0.05 for 5%
+    otherExpenseGrowth: number; 
+    revenueNaturalGrowth: number; // Organic growth without strategy
 }

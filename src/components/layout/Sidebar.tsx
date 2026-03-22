@@ -23,7 +23,9 @@ import {
     Moon,
     Activity,
     Compass,
-    Target
+    Target,
+    Lock,
+    Sparkles
 } from 'lucide-react';
 import { AccountingContext } from '../../context/AccountingContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -54,44 +56,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
     }, []);
 
     const menuGroups = [
+
         {
             title: '경영 및 전략 (STRATEGY)',
             items: [
-                { id: 'dashboard', label: 'CFO 대시보드', description: '실시간 자금 흐름과 전사적 성과 지표를 한눈에 모니터링합니다.', icon: LayoutDashboard },
-                { id: 'reports', label: '경영 분석 리포트', description: 'IR 및 경영진 보고용 자동 생성 리포트를 조회합니다.', icon: TrendingUp },
-                { id: 'strategic-compass', label: '스트래티직 컴퍼스', description: '미래 시나리오 시뮬레이션 및 성장 전략을 수립합니다.', icon: Zap, badge: true, badgeText: "AI Simulation" },
-                { id: 'monthly-pnl', label: '월별 손익 현황', description: '3개년 시뮬레이션 기반 월 단위 정밀 손익 분석을 확인합니다.', icon: PieChart },
-                { id: 'risk-heatmap', label: '리스크 히트맵', description: '전사적 리스크 요인을 시각화하고 우선순위를 관리합니다.', icon: Target },
+                { id: 'dashboard', label: 'CFO 대시보드', description: '실시간 자금 흐름과 전사적 성과 지표를 모니터링합니다.', icon: LayoutDashboard },
+                { id: 'ai-assistant', label: 'AI 지능형 보좌관', description: 'AI assistant에게 경영 및 회계 관련 질문을 합니다.', icon: Sparkles },
+                { id: 'reports', label: '경영 성과 리포트', description: '경영진 전용 보고서를 조회합니다.', icon: TrendingUp },
+                { id: 'strategic-compass', label: '전략 나침반', description: '장기 성장 전략을 수립합니다.', icon: Target },
             ]
         },
         {
-            title: '회계 및 세무 (ACCOUNTING)',
+            title: '회계 및 운영 (OPERATIONS)',
             items: [
-                { id: 'ledger', label: '분개장 (Journal)', description: '모든 회계 거래 내역을 조회하고 관리합니다.', icon: BookOpen },
-                { id: 'ledger-view', label: '총계정원장 (GL)', description: '계정 과목별 상세 원장 데이터를 확인합니다.', icon: FileText },
-                { id: 'approval-desk', label: '전표 승인 데스크', description: 'AI가 분류한 전표의 신뢰도를 검증하고 최종 승인합니다.', icon: ShieldCheck, badge: true, badgeText: "Governance" },
-                { id: 'trial-balance', label: '합계잔액시산표 (TB)', description: '시산표를 통해 자산, 부채, 자본의 균형을 검증합니다.', icon: Calculator },
-                { id: 'financial-statements', label: '재무제표 (B/S, P/L)', description: '공식적인 재무상태표와 손익계산서를 산출합니다.', icon: PieChart },
-                { id: 'tax-adjustments', label: '세무 조정 엔진', description: '법인세 추정 및 세무 조정 사항을 관리합니다.', icon: Calculator },
-                { id: 'advanced-ledger', label: '특수 회계 관리', description: 'R&D 자산화, 외화 평가 등 고난도 회계 처리를 수행합니다.', icon: Zap },
+                { id: 'cashflow', label: '자금일보 (Daily Cash Report)', description: '금일 자금 흐름과 시세 마감을 관리합니다.', icon: Zap },
+                { id: 'approval-desk', label: 'AI 승인 검토 (Approval)', description: 'AI가 분석한 전표를 최종 검토 및 승인합니다.', icon: ShieldCheck },
+                { id: 'ledger', label: '분개 전표 (Journal)', description: '모든 회계 거래 내역을 관리합니다.', icon: BookOpen },
+                { id: 'ledger-view', label: '총계정원장 (GL)', description: '계정별 상세 원장을 조회합니다.', icon: FileText },
+                { id: 'financial-statements', label: '재무제표 (Financial Statements)', description: 'B/S, P/L을 산출합니다.', icon: Database },
+                { id: 'closing', label: '월마감 센터', description: '회계 기간을 공식적으로 마감하고 리포트를 봉인합니다.', icon: Lock },
+                { id: 'risk-dashboard', label: '결산 및 자금 통제', description: '잠재적 위험 요소를 탐지하고 정산 현황을 모니터링합니다.', icon: ShieldCheck },
+                { id: 'monthly-pnl', label: '월별 손익 현황', description: '월 단위 정밀 손익 분석을 확인합니다.', icon: PieChart },
             ]
         },
         {
-            title: '운영 및 자산 (OPERATIONS)',
+            title: '상세 관리 (ADMIN)',
             items: [
-                { id: 'scm', label: '공급망(SCM) 관리', description: '매입/매출 발주 및 물류 프로세스를 추적합니다.', icon: ShoppingCart },
-                { id: 'inventory', label: '재고 자산 관리', description: '품목별 재고 현황 및 가치를 실시간으로 관리합니다.', icon: Package },
-                { id: 'partners', label: '거래처 네트워크', description: '주요 파트너사의 거래 내역 및 상태를 관리합니다.', icon: Users },
-                { id: 'assets', label: '고정자산 관리', description: '유/무형 자산의 취득 및 감가상각을 관리합니다.', icon: Landmark },
-                { id: 'lease-ledger', label: '리스 회계 (IFRS 16)', description: '리스 자산의 부채 인식 및 상환 스케줄을 관리합니다.', icon: TrendingDown },
-                { id: 'settlement', label: '채권/채무 정산', description: '미수금 및 미지급금의 연령 분석 및 정산을 수행합니다.', icon: Calculator },
-            ]
-        },
-        {
-            title: 'AI 거버넌스 (GOVERNANCE)',
-            items: [
-                { id: 'ai-assistant', label: 'AI CFO 어시스턴트', description: '재무적 의사결정을 돕는 AI 비서와 대화합니다.', icon: Activity },
-                { id: 'scenario-manager', label: '시나리오 매니저', description: '발견된 리스크 시나리오를 관리하고 대응책을 수립합니다.', icon: ShieldCheck },
+                { id: 'settlement', label: '채권/채무 정산 (Settlement)', description: '미수금/미지급금을 정산합니다.', icon: Calculator },
+                { id: 'assets', label: '고정자산 관리', description: '유무형 자산 및 상각을 관리합니다.', icon: Landmark },
+                { id: 'lease-ledger', label: '리스 부채 관리 (IFRS 16)', description: '리스 회계를 처리합니다.', icon: TrendingDown },
+                { id: 'partners-ledger', label: '거래처 원장', description: '거래처별 상세 내역을 확인합니다.', icon: Users },
+                { id: 'partners', label: '거래처 정보 관리', description: '파트너사 데이터를 관리합니다.', icon: Settings },
+                { id: 'budgeting', label: '사업 계획 및 예산', description: '예산 편성 및 실적을 대비합니다.', icon: Target },
             ]
         }
     ];
@@ -103,14 +99,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
         return (
             <div className="flex flex-col h-full bg-[#070C18] text-slate-400 border-r border-[#151D2E] shadow-2xl overflow-hidden">
                 {/* Header */}
-                <div className="h-[73px] flex items-center justify-between px-6 border-b border-white/5 shrink-0">
-                    <div className="flex flex-col">
-                        <span className="text-white font-black text-sm tracking-tight text-xl ml-1">AccountingFlow</span>
-                        <span className="text-[9px] font-black uppercase tracking-[0.2em] text-indigo-500/80">Professional Controller</span>
+                <div className="h-[90px] flex flex-col justify-center px-6 border-b border-white/5 shrink-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="text-white font-black text-xl tracking-tight italic">AccountingFlow</span>
+                        <span className="text-indigo-400 font-black text-xs uppercase tracking-tighter">Enterprise</span>
                     </div>
-                    <button onClick={() => setIsOpen(false)} className="lg:hidden text-slate-400 hover:text-white">
-                        <X size={24} />
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <div className="bg-indigo-600/20 border border-indigo-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
+                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">DEVELOPER EDITION</span>
+                        </div>
+                    </div>
                 </div>
 
                 <nav className="flex-1 px-4 py-6 space-y-8 overflow-y-auto custom-scrollbar">
@@ -134,13 +133,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                                             <span className="font-bold text-[13px] tracking-wide truncate">
                                                 {item.label}
                                             </span>
-
-                                            {item.badge && (
-                                                <span className="ml-auto flex items-center gap-1 bg-slate-800 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-md border border-slate-700">
-                                                    <ShieldCheck size={10} className="text-amber-500" />
-                                                    {item.badgeText}
-                                                </span>
-                                            )}
                                         </button>
                                     </Tooltip>
                                 ))}
@@ -150,62 +142,52 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 </nav>
 
                 {/* Bottom Section: System & Onboarding */}
-                <div className="p-4 border-t border-white/5 bg-slate-950/50 backdrop-blur-sm shrink-0 space-y-1">
-                    <h3 className="px-4 text-[9px] font-black text-slate-700 uppercase tracking-[0.15em] mb-2">System</h3>
-                    <button
-                        onClick={() => {
-                            setTab('migration');
-                            if (isMobile) setIsOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group ${activeTab === 'migration' ? 'bg-indigo-600/10 text-indigo-400' : 'hover:bg-white/5 text-slate-500 hover:text-slate-300'}`}
-                    >
-                        <Database size={16} className={activeTab === 'migration' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-300'} />
-                        <span className="font-bold text-[13px] tracking-wide">Data Migration</span>
-                    </button>
+                <div className="p-5 border-t border-white/5 bg-[#0A101E] shrink-0">
+                    <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/20 rounded-2xl p-4 mb-4">
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Professional Plan</span>
+                            <div className="bg-indigo-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                <Zap size={8} className="text-indigo-400 fill-indigo-400" />
+                                <span className="text-[8px] font-black text-indigo-400">AI Plus</span>
+                            </div>
+                        </div>
+                        <div className="w-full bg-white/5 h-1.5 rounded-full mb-3 overflow-hidden">
+                            <div className="bg-indigo-500 h-full w-[84%]" />
+                        </div>
+                        <button className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
+                            Manage Subscription
+                        </button>
+                    </div>
 
-                    <button
-                        onClick={() => {
-                            const nextTheme = theme === 'auto' ? 'light' : theme === 'light' ? 'dark' : 'auto';
-                            setTheme(nextTheme);
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-white/5 hover:text-slate-200 transition-all duration-300 group"
-                    >
-                        <Moon size={16} className="text-slate-500 group-hover:text-slate-300" />
-                        <span className="font-bold text-[13px] tracking-wide">
-                            Dark Mode
-                        </span>
-                    </button>
-
-                    <button
-                        onClick={() => {
-                            setTab('settings');
-                            if (isMobile) setIsOpen(false);
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-white/5 hover:text-slate-200 transition-all duration-300 group"
-                    >
-                        <Settings size={16} className="text-slate-500 group-hover:text-slate-300" />
-                        <span className="font-bold text-[13px] tracking-wide">
-                            System Settings
-                        </span>
-                    </button>
-
-                    <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-white/5 hover:text-white transition-all duration-300 group">
-                        <LogOut size={16} className="text-slate-600 shrink-0" />
-                        <span className="font-bold text-[13px] tracking-wide truncate">Logout</span>
-                    </button>
-
-                    <button
-                        onClick={() => {
-                            if (window.confirm('디버그: 장부를 초기화 하시겠습니까?')) {
-                                resetData();
-                                setTab('dashboard');
-                            }
-                        }}
-                        className="w-full mt-2 flex items-center gap-3 px-4 py-2.5 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all duration-300 group text-slate-600"
-                    >
-                        <RotateCcw size={12} className="shrink-0" />
-                        <span className="font-bold text-[10px] tracking-wide truncate">Reset Data (Dev)</span>
-                    </button>
+                    <div className="space-y-1">
+                        <button 
+                            onClick={() => {
+                                setTab('migration');
+                                if (isMobile) setIsOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 transition-all rounded-lg group ${activeTab === 'migration' ? 'text-indigo-400 bg-white/5' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <Database size={14} className={activeTab === 'migration' ? 'text-indigo-400' : ''} />
+                            <span className="text-xs font-bold">데이터 연동 및 이관</span>
+                        </button>
+                        <button 
+                            onClick={() => {
+                                setTab('settings');
+                                if (isMobile) setIsOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 transition-all rounded-lg group ${activeTab === 'settings' ? 'text-indigo-400 bg-white/5' : 'text-slate-500 hover:text-slate-300'}`}
+                        >
+                            <Settings size={14} className={activeTab === 'settings' ? 'text-indigo-400' : ''} />
+                            <span className="text-xs font-bold">시스템 설정</span>
+                        </button>
+                        <button 
+                            onClick={resetData}
+                            className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-slate-400 hover:text-white transition-all rounded-lg group"
+                        >
+                            <LogOut size={14} />
+                            <span className="text-xs font-bold font-black">로그아웃</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         );

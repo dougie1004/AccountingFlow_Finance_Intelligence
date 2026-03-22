@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { Loader2, Database, CheckCircle2, AlertTriangle, MessageSquare, History, FileText, Zap, Download, Shield, Trash2, Landmark, Boxes, Plus, TrendingDown, Calculator } from 'lucide-react';
+import { Loader2, Database, CheckCircle2, AlertTriangle, MessageSquare, History as HistoryIcon, FileText, Zap, Download, Shield, Trash2, Landmark, Boxes, Plus, TrendingDown, Calculator } from 'lucide-react';
 import { useAI } from '../../hooks/useAI';
 import { useMassProcessor } from '../../hooks/useMassProcessor';
 import { JournalEntry, Partner, ParsedTransaction } from '../../types';
@@ -22,8 +22,32 @@ interface StagingTableProps {
 }
 
 export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onConfirm, onCancel }) => {
+    
+    // Convert AI semantic tags (acc_xxx) to readable names
+
+
     const context = useContext(AccountingContext) as any;
-    const { addPartner, addAsset, config } = context;
+    const { addPartner, addAsset, config, accounts } = context;
+
+    // Convert AI semantic tags (acc_xxx) to readable names
+    const getDisplayAccountName = (rawName: string | undefined): string => {
+        if (!rawName || rawName === '대기 중') return ''; // '대기 중' 오염 방지
+        
+        // 1. Try direct lookup in context accounts (by ID or Name)
+        if (accounts) {
+            const accList = Object.values(accounts) as any[];
+            const found = accList.find(a => a.id === rawName || a.name === rawName);
+            if (found) return found.name;
+        }
+
+        // 2. Fallback to acc_ tag parsing (Legacy/Static)
+        if (rawName.startsWith('acc_')) {
+            const code = rawName.replace('acc_', '').replace('_v', '');
+            const foundStatic = ALL_ACCOUNTS.find(a => a.code === code);
+            if (foundStatic) return foundStatic.name;
+        }
+        return rawName;
+    };
     const { parseTransaction, isParsing } = useAI();
     const { processMassBatch } = useMassProcessor();
     const [stagedData, setStagedData] = useState<ParsedTransaction[]>(
@@ -113,6 +137,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
     };
 
     const displayData = getProcessedData();
+    const isJournalBatch = stagedData.some(r => r.isJournalMode);
 
     const runAIAnalysis = async () => {
         const newData = [...stagedData];
@@ -170,6 +195,70 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
         } finally {
             setIsMassProcessing(false);
             setProcessProgress(null);
+        }
+    };
+
+    const handleConfirmSingle = async (idx: number) => {
+        const tx = stagedData[idx];
+        const isJournalReady = tx.isJournalMode || (tx.debitAccount && tx.creditAccount);
+        
+        if (!tx.accountName && !isJournalReady) {
+            alert('계정과목을 먼저 지정해야 합니다.');
+            return;
+        }
+
+        try {
+            setIsValidating(true);
+            let id = crypto.randomUUID();
+            if (isTauri()) {
+                id = await invoke('generate_journal_id', {
+                    date: tx.date || new Date().toISOString().split('T')[0],
+                    entryType: tx.entryType
+                });
+            }
+
+            const finalCompliance = (tx as any).discrepancyReason
+                ? `[증빙불일치 사유: ${(tx as any).discrepancyReason}] | ${tx.reasoning}`
+                : tx.reasoning;
+
+            // --- Advanced Pairing Logic (Deterministic first) ---
+            let debitAccount = getDisplayAccountName(tx.debitAccount || tx.accountName);
+            let creditAccount = getDisplayAccountName(tx.creditAccount);
+
+            // Default Mapping 보강
+            if (!debitAccount) debitAccount = '미지정 계정';
+            if (!creditAccount) {
+                creditAccount = tx.entryType === 'Revenue' ? '현금/보통예금' : '미지급금';
+            }
+
+            const entry: JournalEntry = {
+                id,
+                date: tx.date || new Date().toISOString().split('T')[0],
+                description: tx.description,
+                vendor: tx.vendor,
+                debitAccount,
+                creditAccount,
+                amount: tx.amount,
+                vat: tx.vat,
+                type: tx.entryType as any,
+                status: 'Unconfirmed',
+                complianceContext: finalCompliance,
+                attachmentUrl: (tx as any).attachmentUrl,
+                auditTrail: [...(tx.auditTrail || []), `Confirmed to Ledger (Single) on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]
+            };
+
+            onConfirm([entry]);
+            
+            // Remove from staging
+            setStagedData(prev => prev.filter((_, i) => i !== idx));
+            if (selectedRow === idx) setSelectedRow(null);
+            
+            alert('✅ 전표가 개별 등록되었습니다.');
+        } catch (error) {
+            console.error('Failed to post single entry:', error);
+            alert('전표 등록 중 오류가 발생했습니다.');
+        } finally {
+            setIsValidating(false);
         }
     };
 
@@ -377,25 +466,38 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                                         <Loader2 size={12} className="animate-spin" /> 연산 중
                                                     </span>
                                                 ) : (
-                                                    <span className={`px-3 py-1 rounded-lg font-black text-xs ${row.accountName ? 'bg-indigo-500/10 text-indigo-400' : 'bg-white/5 text-slate-600'}`}>
-                                                        {row.accountName || '대기 중'}
+                                                    <span className={`px-3 py-1 rounded-lg font-black text-xs ${getDisplayAccountName(row.accountName) ? 'bg-indigo-500/10 text-indigo-400' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                                        {getDisplayAccountName(row.accountName) || '계정 미지정'}
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        const newData = stagedData.filter((_, i) => i !== idx);
-                                                        setStagedData(newData);
-                                                        if (selectedRow === idx) setSelectedRow(null);
-                                                        else if (selectedRow !== null && selectedRow > idx) setSelectedRow(selectedRow - 1);
-                                                    }}
-                                                    className="p-1.5 text-slate-500 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
-                                                    title="Remove from batch"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleConfirmSingle(idx);
+                                                        }}
+                                                        disabled={isValidating || !row.accountName}
+                                                        className="p-2 text-emerald-500 hover:text-white hover:bg-emerald-600 rounded-lg transition-all disabled:opacity-20"
+                                                        title="전표 즉시 전송"
+                                                    >
+                                                        <Zap size={14} />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const newData = stagedData.filter((_, i) => i !== idx);
+                                                            setStagedData(newData);
+                                                            if (selectedRow === idx) setSelectedRow(null);
+                                                            else if (selectedRow !== null && selectedRow > idx) setSelectedRow(selectedRow - 1);
+                                                        }}
+                                                        className="p-2 text-slate-500 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg transition-all"
+                                                        title="Remove from batch"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -422,15 +524,93 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                 </div>
                             </div>
 
+                            {/* [Antigravity] Journal Mode Direct Import Banner */}
+                            {stagedData[selectedRow].isJournalMode && (
+                                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl space-y-2 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="flex items-center gap-2 text-emerald-400">
+                                        <Database size={16} />
+                                        <span className="text-xs font-black uppercase tracking-tight">Journal Mode Detected</span>
+                                    </div>
+                                    <p className="text-[11px] font-bold text-slate-300 leading-relaxed">
+                                        이 파일은 이미 완성된 분개 데이터 구조를 가지고 있습니다. AI 분석을 생략하고 데이터를 직접 전표로 변환합니다.
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* [Antigravity] AI Smart Suggestion (Non-Deterministic Layer) */}
+                            {stagedData[selectedRow].suggestion && !stagedData[selectedRow].isJournalMode && (
+                                <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl space-y-3 animate-in zoom-in-95 duration-300">
+                                    <div className="flex items-center justify-between">
+                                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                                            <Zap size={12} /> AI Rule-Based Suggestion
+                                        </h4>
+                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                                            stagedData[selectedRow].suggestion.confidence === 'high' ? 'bg-emerald-500/20 text-emerald-400' :
+                                            stagedData[selectedRow].suggestion.confidence === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                                            'bg-rose-500/20 text-rose-400'
+                                        }`}>
+                                            {stagedData[selectedRow].suggestion.confidence} Confidence
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
+                                        <div>
+                                            <p className="text-[9px] font-black text-slate-500 uppercase">Suggested Account</p>
+                                            <p className="text-white font-black">{getDisplayAccountName(stagedData[selectedRow].suggestion.suggestedAccount)}</p>
+                                        </div>
+                                        <button
+                                            onClick={() => {
+                                                const newData = [...stagedData];
+                                                const suggestion = stagedData[selectedRow].suggestion;
+                                                if (suggestion?.suggestedAccount) {
+                                                    newData[selectedRow].accountName = suggestion.suggestedAccount;
+                                                    newData[selectedRow].confidence = suggestion.confidence === 'high' ? 'High' : 'Normal';
+                                                }
+                                                if (suggestion?.suggestedPaymentMethod) {
+                                                    newData[selectedRow].paymentMethod = suggestion.suggestedPaymentMethod as any;
+                                                }
+                                                setStagedData(newData);
+                                            }}
+                                            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black rounded-lg transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
+                                        >
+                                            Apply
+                                        </button>
+                                    </div>
+
+                                    <p className="text-[11px] font-bold text-slate-400 leading-relaxed italic">
+                                        "{stagedData[selectedRow].suggestion.reasoning}"
+                                    </p>
+                                </div>
+                            )}
+
                             {/* Expert Note (Reasoning) */}
                             {stagedData[selectedRow].reasoning && (
                                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-2">
                                     <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                                        <Zap size={12} /> AI Expert Note
+                                        <Zap size={12} /> Cognitive Ledger Analytics
                                     </h4>
                                     <p className="text-sm font-bold text-slate-300 leading-relaxed indent-0">
                                         {cleanMarkdown(stagedData[selectedRow].reasoning)}
                                     </p>
+                                </div>
+                            )}
+
+                            {/* Audit Trail / Source Tracking */}
+                            {stagedData[selectedRow].auditTrail && stagedData[selectedRow].auditTrail!.length > 0 && (
+                                <div className="p-4 bg-[#0B1221] border border-white/5 rounded-2xl space-y-3">
+                                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                        <HistoryIcon size={12} /> Source Traceability (Audit Trail)
+                                    </h4>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                                        {stagedData[selectedRow].auditTrail?.map((trail, i) => (
+                                            <div key={i} className="flex gap-2">
+                                                <div className="w-1 h-1 rounded-full bg-slate-700 mt-1.5 shrink-0" />
+                                                <span className="text-[10px] font-bold text-slate-400 leading-tight">
+                                                    {trail}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
 
@@ -470,7 +650,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">Account (계정과목)</label>
                                     <input
                                         list="staging-account-list"
-                                        value={stagedData[selectedRow].accountName || ""}
+                                        value={getDisplayAccountName(stagedData[selectedRow].accountName) || stagedData[selectedRow].accountName || ""}
                                         onChange={(e) => {
                                             const newData = [...stagedData];
                                             newData[selectedRow].accountName = e.target.value;
@@ -479,9 +659,38 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                             newData[selectedRow].reasoning = "사용자 수동 입력";
                                             setStagedData(newData);
                                         }}
-                                        placeholder="계정과목을 입력하거나 선택하세요..."
+                                        placeholder={stagedData[selectedRow].isJournalMode ? "Primary Account (Optional in Journal Mode)" : "계정과목을 입력하거나 선택하세요..."}
                                         className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white font-bold text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
                                     />
+                                    
+                                    {stagedData[selectedRow].isJournalMode && (
+                                        <div className="grid grid-cols-2 gap-4 pt-2">
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] font-black text-emerald-400 uppercase tracking-wider block ml-1">Debit Account (차변)</label>
+                                                <input
+                                                    value={getDisplayAccountName(stagedData[selectedRow].debitAccount) || stagedData[selectedRow].debitAccount || ""}
+                                                    onChange={(e) => {
+                                                        const newData = [...stagedData];
+                                                        newData[selectedRow].debitAccount = e.target.value;
+                                                        setStagedData(newData);
+                                                    }}
+                                                    className="w-full px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] font-black text-rose-400 uppercase tracking-wider block ml-1">Credit Account (대변)</label>
+                                                <input
+                                                    value={getDisplayAccountName(stagedData[selectedRow].creditAccount) || stagedData[selectedRow].creditAccount || ""}
+                                                    onChange={(e) => {
+                                                        const newData = [...stagedData];
+                                                        newData[selectedRow].creditAccount = e.target.value;
+                                                        setStagedData(newData);
+                                                    }}
+                                                    className="w-full px-3 py-2 bg-rose-500/5 border border-rose-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-rose-500 outline-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                     <datalist id="staging-account-list">
                                         {ALL_ACCOUNTS.map(acc => (
                                             <option key={acc.code} value={acc.name}>{acc.name} ({acc.code} - {acc.description})</option>
@@ -517,6 +726,24 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     </div>
                                 </div>
 
+                                <div className="pt-2">
+                                    <button
+                                        onClick={() => {
+                                            const newData = [...stagedData];
+                                            newData[selectedRow].needsClarification = false;
+                                            newData[selectedRow].confidence = "High";
+                                            if (newData[selectedRow].reasoning && !newData[selectedRow].reasoning.includes("[사용자 수동 승인]")) {
+                                                newData[selectedRow].reasoning = `[사용자 수동 승인] ${newData[selectedRow].reasoning}`;
+                                            }
+                                            setStagedData(newData);
+                                            alert('현재 전표의 계정 및 상태가 확정되었습니다.');
+                                        }}
+                                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95"
+                                    >
+                                        <CheckCircle2 size={16} /> 현재 전표 확인 및 상태 확정 (Confirm Entry)
+                                    </button>
+                                </div>
+
                                 {/* [Integrity V2] Conditional Discrepancy Reason Field */}
                                 {((stagedData[selectedRow] as any).originalAmount !== undefined &&
                                     stagedData[selectedRow].amount !== (stagedData[selectedRow] as any).originalAmount) && (
@@ -538,7 +765,12 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     )}
 
                                 {/* [Withholding Tax V2] Payroll Breakdown Assistant */}
-                                {(stagedData[selectedRow].description?.includes('급여') || stagedData[selectedRow].accountName?.includes('급여')) && (
+                                {((stagedData[selectedRow].entryType === 'Payroll') ||
+                                  (stagedData[selectedRow].description?.toUpperCase().includes('PAY')) ||
+                                  (stagedData[selectedRow].description?.includes('인건비')) ||
+                                  (stagedData[selectedRow].description?.includes('급여')) ||
+                                  (stagedData[selectedRow].accountName?.includes('acc_801')) ||
+                                  (stagedData[selectedRow].accountName?.includes('급여'))) && (
                                     <div className="p-5 bg-blue-500/10 border border-blue-500/20 rounded-2xl space-y-4 animate-in slide-in-from-right-4 duration-500">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2 text-blue-400">
@@ -966,7 +1198,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                             {/* Audit Trail */}
                             <div className="space-y-3">
                                 <div className="flex items-center gap-2 text-indigo-400">
-                                    <History size={16} />
+                                    <HistoryIcon size={16} />
                                     <span className="text-xs font-black uppercase tracking-tight">Digital Audit Trail</span>
                                 </div>
                                 <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 scrollbar-thin">
@@ -1056,18 +1288,21 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                             : tx.reasoning;
 
                                         // Determine Debit/Credit accounts based on composite position or simple entry logic
-                                        let debitAccount = tx.accountName || '계정 미지정';
-                                        let creditAccount = tx.entryType === 'Revenue' ? (tx.accountName || '현금/매수금') : '미지급금';
+                                        let debitAccount = getDisplayAccountName(tx.debitAccount || tx.accountName) || '계정 미지정';
+                                        let creditAccount = getDisplayAccountName(tx.creditAccount) || (tx.entryType === 'Revenue' ? (getDisplayAccountName(tx.accountName) || '현금/매수금') : '미지급금');
 
-                                        if (tx.position === 'Debit') {
-                                            debitAccount = tx.accountName || '계정 미지정';
+                                        if (tx.isJournalMode && (tx.debitAccount || tx.creditAccount)) {
+                                            debitAccount = getDisplayAccountName(tx.debitAccount) || '[분개그룹 클리어링]';
+                                            creditAccount = getDisplayAccountName(tx.creditAccount) || '[분개그룹 클리어링]';
+                                        } else if (tx.position === 'Debit') {
+                                            debitAccount = getDisplayAccountName(tx.accountName) || '계정 미지정';
                                             creditAccount = '[분개그룹 클리어링]';
                                         } else if (tx.position === 'Credit') {
                                             debitAccount = '[분개그룹 클리어링]';
-                                            creditAccount = tx.accountName || '계정 미지정';
-                                        } else if (tx.entryType === 'Payroll') {
-                                            debitAccount = '급여';
-                                            creditAccount = '미지급급여';
+                                            creditAccount = getDisplayAccountName(tx.accountName) || '계정 미지정';
+                                        } else if (!tx.isJournalMode && tx.entryType === 'Payroll') {
+                                            debitAccount = tx.debitAccount || '급여';
+                                            creditAccount = tx.creditAccount || '미지급급여';
                                         }
 
                                         return {
@@ -1075,8 +1310,8 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                             date: tx.date || new Date().toISOString().split('T')[0],
                                             description: tx.description,
                                             vendor: tx.vendor,
-                                            debitAccount,
-                                            creditAccount,
+                                            debitAccount: debitAccount === '대기 중' ? '미지정 계정' : debitAccount,
+                                            creditAccount: creditAccount === '대기 중' ? (tx.entryType === 'Revenue' ? '현금/매수금' : '미지급금') : creditAccount,
                                             amount: tx.amount,
                                             vat: tx.vat,
                                             type: tx.entryType,

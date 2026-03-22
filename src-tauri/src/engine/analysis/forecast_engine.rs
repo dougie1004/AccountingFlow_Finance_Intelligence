@@ -12,6 +12,15 @@ pub struct CashFlowForecast {
     pub risk_level: String,
     pub recommendations: Vec<String>,
     pub ai_insights: String,
+    pub probabilistic_data: Option<ProbabilisticData>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbabilisticData {
+    pub p10: Vec<f64>, // Conservative / Reality
+    pub p50: Vec<f64>, // Median / Standard
+    pub p90: Vec<f64>, // Rosy / Rose-Colored
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -77,22 +86,44 @@ pub async fn generate_cash_flow_forecast(
     let mut projected_months = Vec::new();
     let mut running_balance = current_balance;
 
+    // --- Probabilistic Path Arrays ---
+    let mut p10_path = Vec::new(); // Conservative (Reality)
+    let mut p50_path = Vec::new(); // Median (Standard)
+    let mut p90_path = Vec::new(); // Rosy (Rose-Colored)
+    let mut rb_p10 = current_balance;
+    let mut rb_p50 = current_balance;
+    let mut rb_p90 = current_balance;
+
     for i in 1..=36 {
         let month_name = get_future_month_name(i);
         
-        // 복리 성장 반영
-        let expected_revenue = monthly_revenue * (1.0 + rev_growth).powf(i as f64);
-        let expected_expenses = monthly_burn_rate * (1.0 + exp_growth).powf(i as f64);
-        let net_cash_flow = expected_revenue - expected_expenses;
+        // P50 (Standard): Based on detected trend
+        let rev_p50 = monthly_revenue * (1.0 + rev_growth).powf(i as f64);
+        let exp_p50 = monthly_burn_rate * (1.0 + exp_growth).powf(i as f64);
+        rb_p50 += rev_p50 - exp_p50;
+        p50_path.push(rb_p50);
+
+        // P10 (Reality/Conservative): 0% Revenue Growth + 10% Expense Buffer
+        let rev_p10 = monthly_revenue; // No growth per doc
+        let exp_p10 = monthly_burn_rate * 1.1 * (1.0 + exp_growth.max(0.0)).powf(i as f64);
+        rb_p10 += rev_p10 - exp_p10;
+        p10_path.push(rb_p10);
+
+        // P90 (Rosy/Rose-Colored): +10% Revenue efficiency + 5% Expense saving
+        let rev_p90 = (monthly_revenue * 1.1) * (1.0 + rev_growth.max(0.05)).powf(i as f64);
+        let exp_p90 = (monthly_burn_rate * 0.95) * (1.0 + exp_growth.min(0.02)).powf(i as f64);
+        rb_p90 += rev_p90 - exp_p90;
+        p90_path.push(rb_p90);
         
-        running_balance += net_cash_flow;
+        // Standard Projection (Main Line) matches P50
+        running_balance = rb_p50;
 
         projected_months.push(MonthlyProjection {
             month: month_name,
             projected_balance: running_balance,
-            expected_revenue,
-            expected_expenses,
-            net_cash_flow,
+            expected_revenue: rev_p50,
+            expected_expenses: exp_p50,
+            net_cash_flow: rev_p50 - exp_p50,
         });
     }
 
@@ -135,6 +166,11 @@ pub async fn generate_cash_flow_forecast(
         risk_level,
         recommendations,
         ai_insights,
+        probabilistic_data: Some(ProbabilisticData {
+            p10: p10_path,
+            p50: p50_path,
+            p90: p90_path,
+        }),
     })
 }
 

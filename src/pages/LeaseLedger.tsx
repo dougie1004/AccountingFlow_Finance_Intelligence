@@ -8,8 +8,9 @@ export const LeaseLedger: React.FC = () => {
     const { ledger, subLedger, config, addEntries } = useAccounting();
 
     // Filter for Lease Recognition and Payment entries from Approved records
-    const rouAssets = subLedger.filter(e => e.debitAccount.includes('사용권자산'));
-    const leaseLiabilities = subLedger.filter(e => e.debitAccount.includes('리스부채') || e.creditAccount.includes('리스부채'));
+    const approvedLeaseEntries = ledger.filter(e => e.status === 'Approved');
+    const rouAssets = approvedLeaseEntries.filter(e => e.debitAccount.includes('사용권자산') || (e.complexLines?.some(cl => cl.account.includes('사용권자산') && cl.debit > 0)));
+    const leaseLiabilities = approvedLeaseEntries.filter(e => e.debitAccount.includes('리스부채') || e.creditAccount.includes('리스부채') || (e.complexLines?.some(cl => cl.account.includes('리스부채'))));
 
     // Potential leases found in Unconfirmed records
     const pendingLeaseExpenses = ledger.filter(e => e.status === 'Unconfirmed' && (e.description.includes('리스') || e.description.includes('렌트')));
@@ -146,7 +147,7 @@ export const LeaseLedger: React.FC = () => {
                                             <td className="px-8 py-6">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-black text-white">{entry.description}</span>
-                                                    <span className="text-[10px] text-slate-500 font-bold">{entry.vendor} | {entry.id}</span>
+                                                    <span className="text-[10px] text-slate-500 font-bold">{entry.vendor || 'Unknown Vendor'} | {entry.id}</span>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-6 text-[12px] font-bold text-slate-400">{entry.date}</td>

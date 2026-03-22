@@ -1,6 +1,6 @@
-import React, { useContext, useMemo, useState } from 'react';
-import { AccountingContext } from '../context/AccountingContext';
-import { CheckCircle, CheckCircle2, XCircle, Clock, Search, Filter, LayoutGrid, List, Download, FileJson, AlertTriangle, Paperclip, Zap, Sparkles, CheckSquare } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { useAccounting } from '../hooks/useAccounting';
+import { CheckCircle, CheckCircle2, XCircle, Clock, Search, Filter, LayoutGrid, List, Download, FileJson, AlertTriangle, Paperclip, Zap, Sparkles, CheckSquare, History as HistoryIcon } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { JournalEntry, ParsedTransaction } from '../types';
 import { ALL_ACCOUNTS } from '../constants/accounts';
@@ -8,7 +8,11 @@ import { cleanMarkdown } from '../utils/textUtils';
 import { EvidenceViewer } from '../components/EvidenceViewer';
 
 const ApprovalDesk: React.FC = () => {
-    const { ledger, approveEntry, deleteEntry, bulkApprove, addEntries, updateEntry, acceptVatSuggestion } = useContext(AccountingContext)!;
+    const { 
+        ledger, approveEntry, deleteEntry, bulkApprove, 
+        addEntries, updateEntry, acceptVatSuggestion,
+        addAccount
+    } = useAccounting();
     const [viewMode, setViewMode] = useState<'card' | 'grid'>('card');
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isImporting, setIsImporting] = useState(false);
@@ -91,8 +95,8 @@ const ApprovalDesk: React.FC = () => {
                     date: p.date || new Date().toISOString().split('T')[0],
                     description: p.description || '',
                     vendor: p.vendor && p.vendor.trim() !== '' ? p.vendor : undefined,
-                    debitAccount: p.accountName || (p.entryType === 'Expense' ? 'Expenses' : 'Assets'),
-                    creditAccount: 'Cash',
+                    debitAccount: p.accountName || (p.entryType === 'Expense' ? '기타비용' : '비품'),
+                    creditAccount: '현금',
                     amount: p.amount,
                     vat: p.vat,
                     taxBaseAmount: p.taxBaseAmount,
@@ -162,6 +166,32 @@ const ApprovalDesk: React.FC = () => {
                         {isImporting ? '처리 중...' : 'CSV 대량 업로드'}
                         <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} disabled={isImporting} />
                     </label>
+
+                    <button
+                        onClick={() => {
+                            const accName = prompt("새로 등록할 계정과목 명을 입력하세요. (예: 사내복지기금)");
+                            if (accName) {
+                                let nature = prompt("해당 계정과목이 속하는 대분류 영문을 입력하세요.\n(ASSET: 자산, LIABILITY: 부채, EQUITY: 자본, REVENUE: 수익, EXPENSE: 비용)", "EXPENSE");
+                                if (nature && ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'].includes(nature.toUpperCase())) {
+                                    addAccount({
+                                        id: `acc_ext_${crypto.randomUUID().slice(0, 6)}`,
+                                        code: `99${Math.floor(Math.random() * 9)}`,
+                                        name: accName.trim(),
+                                        nature: nature.toUpperCase() as any,
+                                        statement: ['ASSET', 'LIABILITY', 'EQUITY'].includes(nature.toUpperCase()) ? 'BS' : 'PL',
+                                        section: '사용자 추가 계정',
+                                        group: '사용자 특별 등록'
+                                    });
+                                    alert(`'${accName}' 계정이 정상적으로 추가되었습니다. 이제 전표를 문제없이 승인할 수 있습니다.`);
+                                } else {
+                                    alert("잘못된 분류값입니다. 등록이 취소되었습니다.");
+                                }
+                            }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 rounded-xl font-black text-xs hover:bg-indigo-600/40 transition-all shadow-lg"
+                    >
+                        + 계정과목 임시 등록
+                    </button>
 
                     {selectedIds.size > 0 && (
                         <button
@@ -352,15 +382,19 @@ const ApprovalDesk: React.FC = () => {
                                                 </p>
 
                                                 {/* [Antigravity] Raw Source Exposure for Self-Awareness */}
-                                                {entry.auditTrail?.find(log => log.startsWith('Raw Source:')) && (
-                                                    <div className="mt-3 pt-3 border-t border-white/5">
+                                                {entry.auditTrail && entry.auditTrail.length > 0 && (
+                                                    <div className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
                                                         <div className="flex items-center gap-2 mb-1">
-                                                            <Search size={12} className="text-slate-500" />
-                                                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Ground Truth (Raw Data)</span>
+                                                            <HistoryIcon size={12} className="text-slate-500" />
+                                                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Audit Trail & Traceability</span>
                                                         </div>
-                                                        <code className="text-[10px] font-mono text-slate-400 bg-black/20 px-2 py-1 rounded block truncate" title={entry.auditTrail.find(log => log.startsWith('Raw Source:'))?.replace('Raw Source: ', '')}>
-                                                            {entry.auditTrail.find(log => log.startsWith('Raw Source:'))?.replace('Raw Source: ', '')}
-                                                        </code>
+                                                        <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 pr-2">
+                                                            {entry.auditTrail.map((log, i) => (
+                                                                <code key={i} className="text-[9px] font-mono text-slate-400 bg-black/20 px-2 py-0.5 rounded block truncate" title={log}>
+                                                                    {log}
+                                                                </code>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>

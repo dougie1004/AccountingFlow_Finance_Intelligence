@@ -1,6 +1,8 @@
-import React, { createContext, useState, useMemo, ReactNode } from 'react';
-import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction } from '../types';
-import { generateMockBatch, simulateAIParsing } from '../utils/mockDataGenerator';
+import React, { createContext, useState, useMemo, ReactNode, useEffect, useCallback } from 'react';
+import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction, LedgerLine, TrialBalance, AccountDefinition, MacroAssumptions } from '../types';
+import { calculateTrialBalance, calculateFinancialsFromTB, unrollJournalToLedger, generateMultiYearSimulation } from '../core/engine';
+import { CHART_OF_ACCOUNTS } from '../core/coa';
+import { ALL_ACCOUNTS, MASTER_ACCOUNTS } from '../constants/accounts';
 
 export interface AccountingContextType {
     ledger: JournalEntry[];
@@ -31,9 +33,54 @@ export interface AccountingContextType {
     setStagingTransactions: (txs: ParsedTransaction[]) => void;
     config: TenantConfig;
     updateConfig: (updates: Partial<TenantConfig>) => void;
-    subLedger: JournalEntry[];
+    subLedger: LedgerLine[]; 
     inventory: InventoryItem[];
     transactions: JournalEntry[];
+    finalizedMonths: Record<string, 'soft' | 'hard'>;
+    performClosing: (month: string, type: 'soft' | 'hard') => void;
+    reopenMonth: (month: string) => void;
+    activeTab: string;
+    selectedDate: string;
+    setSelectedDate: (date: string) => void;
+    setTab: (tab: string) => void;
+    trialBalance: TrialBalance;
+    accounts: Record<string, AccountDefinition>;
+    addAccount: (acc: AccountDefinition) => void;
+    updateAccount: (name: string, updates: Partial<AccountDefinition>) => void;
+    accountingLedger: LedgerLine[]; 
+    calculateTBForRange: (start: string, end: string, scope?: 'actual' | 'scenario') => TrialBalance;
+    isPeriodLocked: (date: string) => boolean;
+    isDev: boolean;
+    allLinesLedger: LedgerLine[];
+    companyKnowledge: string;
+    updateCompanyKnowledge: (knowledge: string) => void;
+    // [V2.6] Session Persistence for Metrics & Scenarios
+    baselineSnapshot: { date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null;
+    setBaselineSnapshot: (snapshot: any) => void;
+    scenarioResults: JournalEntry[];
+    setScenarioResults: (results: JournalEntry[]) => void;
+    baselineEntries: JournalEntry[];
+    setBaselineEntries: (entries: JournalEntry[]) => void;
+    baselineTimestamp: number | null;
+    setBaselineTimestamp: (time: number | null) => void;
+
+    // [V2.6] Strategic Compass Persistence
+    revenueMult: number;
+    setRevenueMult: (val: number) => void;
+    expenseMult: number;
+    setExpenseMult: (val: number) => void;
+    fixedCostDelta: number;
+    setFixedCostDelta: (val: number) => void;
+    preMoneyValuation: number;
+    setPreMoneyValuation: (val: number) => void;
+    projectionMonths: number;
+    setProjectionMonths: (val: number) => void;
+    macro: MacroAssumptions;
+    setMacro: (val: MacroAssumptions) => void;
+    founderInitialOwnership: number;
+    setFounderInitialOwnership: (val: number) => void;
+    investmentAmount: number;
+    setInvestmentAmount: (val: number) => void;
 }
 
 export const AccountingContext = createContext<AccountingContextType | undefined>(undefined);
@@ -41,12 +88,62 @@ export const AccountingContext = createContext<AccountingContextType | undefined
 const INITIAL_DATA: JournalEntry[] = [];
 
 export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+    const isDev = !(import.meta as any).env.PROD;
+    const isInitialLoad = React.useRef(true);
     const [ledger, setLedger] = useState<JournalEntry[]>(INITIAL_DATA);
     const [partners, setPartners] = useState<Partner[]>([]);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [scmOrders, setScmOrders] = useState<Order[]>([]);
     const [stagingTransactions, setStagingTransactions] = useState<ParsedTransaction[]>([]);
+    const [finalizedMonths, setFinalizedMonths] = useState<Record<string, 'soft' | 'hard'>>({});
+    const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [accounts, setAccounts] = useState<Record<string, AccountDefinition>>(() => {
+        // [Integrity Sync] Merge core COA with all master accounts for maximum coverage
+        const initial = { ...CHART_OF_ACCOUNTS };
+        ALL_ACCOUNTS.forEach(acc => {
+            if (!initial[acc.name]) {
+                const nature = (Object.keys(MASTER_ACCOUNTS).find(k => (MASTER_ACCOUNTS as any)[k].some((a: any) => a.code === acc.code)) || 'EXPENSE') as any;
+                initial[acc.name] = {
+                    id: `acc_${acc.code}`,
+                    code: acc.code,
+                    name: acc.name,
+                    nature,
+                    statement: ['ASSET', 'LIABILITY', 'EQUITY'].includes(nature) ? 'BS' : 'PL',
+                    section: '기본 계정',
+                    group: '표준 계정과목'
+                };
+            }
+        });
+        return initial;
+    });
+    const [activeTab, setTab] = useState<string>('dashboard');
+    const [companyKnowledge, setCompanyKnowledge] = useState<string>(() => {
+        return localStorage.getItem('accounting_company_knowledge') || 
+               "표준 회계 정책: 모든 지출은 적격증빙을 지향하며, 접대비는 한도를 준수함. 계약서에 명시되지 않은 비용은 집행 전 CFO 승인을 득해야 함.";
+    });
+
+    // [V2.6] Session Persistence (SURVIVES TAB NAVIGATION)
+    const [baselineSnapshot, setBaselineSnapshot] = useState<{ date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null>(null);
+    const [scenarioResults, setScenarioResults] = useState<JournalEntry[]>([]);
+    const [baselineEntries, setBaselineEntries] = useState<JournalEntry[]>([]);
+    const [baselineTimestamp, setBaselineTimestamp] = useState<number | null>(null);
+
+    // [V2.6] Strategic Compass Persistence States
+    const [revenueMult, setRevenueMult] = useState(1.0);
+    const [expenseMult, setExpenseMult] = useState(1.0);
+    const [fixedCostDelta, setFixedCostDelta] = useState(0);
+    const [preMoneyValuation, setPreMoneyValuation] = useState(500000000);
+    const [projectionMonths, setProjectionMonths] = useState(36);
+    const [macro, setMacro] = useState<MacroAssumptions>({
+        inflationRate: 0.03,
+        wageGrowthRate: 0.05,
+        otherExpenseGrowth: 0.02,
+        revenueNaturalGrowth: 0.01
+    });
+    const [founderInitialOwnership, setFounderInitialOwnership] = useState(1.0);
+    const [investmentAmount, setInvestmentAmount] = useState(0);
+
     const [config, setConfig] = useState<TenantConfig>({
         tenantId: 'default-tenant',
         isReadOnly: false,
@@ -66,18 +163,66 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         }
     });
 
+    const isPeriodLocked = useCallback((date: string) => {
+        const monthKey = date.slice(0, 7);
+        return !!finalizedMonths[monthKey];
+    }, [finalizedMonths]);
+
     const addEntry = (entry: JournalEntry) => {
-        // Default to Unconfirmed for governance
-        setLedger((prev) => [...prev, { ...entry, status: entry.status || 'Unconfirmed' }]);
+        if (isPeriodLocked(entry.date)) {
+            alert(`[PERIOD LOCKED] ${entry.date.slice(0, 7)} 기간은 이미 결산되었습니다. 새로운 전표를 입력할 수 없습니다.`);
+            return;
+        }
+        // Enforce ID preservation or mapping on creation
+        const debitId = entry.debitAccountId || Object.values(accounts).find(a => a.name === entry.debitAccount)?.id;
+        const creditId = entry.creditAccountId || Object.values(accounts).find(a => a.name === entry.creditAccount)?.id;
+        
+        const enriched = { 
+            ...entry, 
+            status: entry.status || 'Unconfirmed',
+            debitAccountId: debitId,
+            creditAccountId: creditId,
+            complexLines: entry.complexLines?.map(cl => ({
+                ...cl,
+                accountId: cl.accountId || Object.values(accounts).find(a => a.name === cl.account)?.id
+            }))
+        };
+        setLedger((prev) => [...prev, enriched]);
     };
 
     const addEntries = (entries: JournalEntry[]) => {
-        setLedger((prev) => [...prev, ...entries.map(e => ({
-            ...e,
-            status: e.status || 'Unconfirmed',
-            ledgerType: e.ledgerType || 'Candidate',
-            auditTrail: e.auditTrail || []
-        }))]);
+        // Filter out entries in locked periods
+        const validEntries = entries.filter(e => {
+            if (isPeriodLocked(e.date)) {
+                console.warn(`[PERIOD LOCKED] Skipping entry ${e.id} due to closed period ${e.date.slice(0, 7)}`);
+                return false;
+            }
+            return true;
+        });
+        
+        if (validEntries.length === 0 && entries.length > 0) {
+            alert("입력한 모든 전표의 기간이 마감되어 있어 처리가 중단되었습니다.");
+            return;
+        }
+
+        const enriched = validEntries.map(e => {
+            const debitId = e.debitAccountId || Object.values(accounts).find(a => a.name === e.debitAccount)?.id;
+            const creditId = e.creditAccountId || Object.values(accounts).find(a => a.name === e.creditAccount)?.id;
+            
+            return {
+                ...e,
+                status: e.status || 'Unconfirmed',
+                ledgerType: e.ledgerType || 'Candidate',
+                auditTrail: e.auditTrail || [],
+                debitAccountId: debitId,
+                creditAccountId: creditId,
+                complexLines: e.complexLines?.map(cl => ({
+                    ...cl,
+                    accountId: cl.accountId || Object.values(accounts).find(a => a.name === cl.account)?.id
+                }))
+            };
+        });
+        setLedger((prev) => [...prev, ...enriched]);
     };
 
     const addPartner = (partner: Partner) => {
@@ -88,41 +233,240 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         setPartners(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     };
 
+    const migrateLedgerToIds = useCallback(() => {
+        setLedger(prev => {
+            let changed = false;
+            const migrated = prev.map(entry => {
+                const needsMigration = !entry.debitAccountId || !entry.creditAccountId || 
+                    (entry.complexLines?.some(cl => !cl.accountId));
+                
+                if (!needsMigration) return entry;
+                
+                const newEntry = { ...entry };
+                const findAcc = (name: string | undefined) => {
+                    if (!name) return undefined;
+                    const cleanName = name.trim();
+                    // Direct match
+                    if (accounts[cleanName]) return accounts[cleanName].id;
+                    // Fuzzy match (normalize whitespace)
+                    return Object.values(accounts).find(a => a.name.trim() === cleanName)?.id;
+                };
+
+                if (!entry.debitAccountId) {
+                    const id = findAcc(entry.debitAccount);
+                    if (id) {
+                        newEntry.debitAccountId = id;
+                        changed = true;
+                    }
+                }
+                if (!entry.creditAccountId) {
+                    const id = findAcc(entry.creditAccount);
+                    if (id) {
+                        newEntry.creditAccountId = id;
+                        changed = true;
+                    }
+                }
+                if (entry.complexLines) {
+                    newEntry.complexLines = entry.complexLines.map(cl => {
+                        const id = cl.accountId || findAcc(cl.account);
+                        if (id && !cl.accountId) {
+                            changed = true;
+                            return { ...cl, accountId: id };
+                        }
+                        return cl;
+                    });
+                }
+                return newEntry;
+            });
+            return changed ? migrated : prev;
+        });
+    }, [accounts]);
+
+    useEffect(() => {
+        if (Object.keys(accounts).length > 0 && ledger.length > 0) {
+            migrateLedgerToIds();
+        }
+    }, [ledger.length, migrateLedgerToIds]);
+
+    // [DEMO MODE] Load 3-year Strategic Scenario by default if empty on first load
+    // 대표님 요청: 전표를 올리지 않았는데 자동 생성되는 현상 방지. 임시로 주석 처리합니다.
+    useEffect(() => {
+        if (ledger.length === 0 && isInitialLoad.current) {
+            isInitialLoad.current = false;
+            // console.log("[AccountingFlow] Initializing Demo Mode: 3-Year Strategic Baseline");
+            // const demo = generateMultiYearSimulation([2026, 2027, 2028], 'STANDARD');
+            // loadSimulation(demo);
+        }
+    }, [ledger.length]);
+
     const approveEntry = (id: string) => {
-        setLedger(prev => prev.map(e => e.id === id ? { ...e, status: 'Approved' } : e));
+        const entry = ledger.find(e => e.id === id);
+        if (entry) {
+            // [POSTING GUARD] Hard-Gate for finalized periods
+            const monthKey = entry.date.slice(0, 7); // YYYY-MM
+            if (finalizedMonths[monthKey]) {
+                const msg = `[POSTING BLOCKED] ${monthKey} 기간은 이미 결산(${finalizedMonths[monthKey]})되었습니다. 전표를 승인하려면 먼저 해당 월의 마감을 해제하십시오.`;
+                console.warn(msg);
+                alert(msg);
+                return; 
+            }
+
+            // [STRICT GATE - Phase 3] Account Identity verification
+            const isComplex = entry.complexLines && entry.complexLines.length > 0;
+            const missingId = isComplex 
+                ? entry.complexLines?.some(cl => !cl.accountId)
+                : (!entry.debitAccountId || !entry.creditAccountId);
+
+            if (missingId) {
+                const missingDetail = isComplex 
+                    ? entry.complexLines?.filter(cl => !cl.accountId).map(cl => cl.account).join(', ')
+                    : `${!entry.debitAccountId ? `차변(${entry.debitAccount})` : ''} ${!entry.creditAccountId ? `대변(${entry.creditAccount})` : ''}`.trim();
+                
+                const msg = `[FATAL INTEGRITY ERROR] 승인 불가: [${missingDetail}] 계정이 Chart of Accounts(COA)에 등록되어 있지 않거나 ID가 누락되었습니다. 계정을 먼저 등록하십시오.`;
+                console.error(msg);
+                alert(msg);
+                return; 
+            }
+
+            // [STRUCTURAL CASH POLICY] Improved Gate: Use balance as of entry date to support future-dated and sequential testing
+            const drMeta = Object.values(accounts).find(a => a.name === entry.debitAccount);
+            const crMeta = Object.values(accounts).find(a => a.name === entry.creditAccount);
+            
+            const total = entry.amount + (entry.vat || 0);
+            const isCashOut = (entry.type === 'Expense' || entry.type === 'Asset' || entry.type === 'Payroll' || entry.type === 'Funding') && 
+                              (entry.creditAccount.includes('현금') || entry.creditAccount.includes('보통') || entry.creditAccount.includes('예금'));
+            
+            if (isCashOut) {
+                // Calculate real-time TB up to this entry's date
+                const currentYear = entry.date.split('-')[0];
+                const periodStart = `${currentYear}-01-01`;
+                const tbAtEntryDate = calculateTrialBalance(accountingLedger, periodStart, entry.date, entry.scope || 'actual', accounts);
+                const financialsAtEntryDate = calculateFinancialsFromTB(tbAtEntryDate);
+                const availableCash = financialsAtEntryDate.cash;
+
+                if (availableCash < total) {
+                    const errorMsg = `[POLCY BREACH] 잔액 부족 (Structural Cash Policy): 전표 승인이 거부되었습니다.\n\n요청 금액: ₩${total.toLocaleString()}\n장부 잔액(전표 일자 ${entry.date} 기준): ₩${availableCash.toLocaleString()}\n\n자본금 납입 등 입금 전표가 먼저 승인되었는지, 혹은 날짜가 올바른지 확인하십시오.`;
+                    console.error(errorMsg);
+                    alert(errorMsg); 
+                    return; 
+                }
+            }
+        }
+        setLedger(prev => prev.map(e => {
+            if (e.id === id && e.status !== 'Approved') {
+                // [AUTO-REGISTRATION] Detect New Partners
+                if (e.vendor && e.vendor !== '-' && !partners.some(p => p.name === e.vendor)) {
+                    addPartner({
+                        id: `partner_${Date.now()}`,
+                        name: e.vendor,
+                        partnerType: e.type === 'Revenue' ? 'Customer' : 'Vendor',
+                        status: 'Pending',
+                        tags: ['Auto-Registered']
+                    });
+                }
+
+                // [AUTO-REGISTRATION] Detect New Assets (Fixed Asset Accounts on Debit)
+                const assetAccounts = ['비품', '기계장치', '차량운반구', '소프트웨어', '건물'];
+                if (assetAccounts.some(acc => e.debitAccount?.includes(acc))) {
+                    addAsset({
+                        id: `asset_${Date.now()}`,
+                        name: e.description,
+                        category: e.debitAccount,
+                        acquisitionDate: e.date,
+                        cost: e.amount,
+                        depreciationMethod: 'STRAIGHT_LINE',
+                        usefulLife: 5,
+                        residualValue: 0,
+                        accumulatedDepreciation: 0,
+                        currentValue: e.amount,
+                        status: 'Active',
+                        location: 'Headquarters'
+                    } as any);
+                }
+
+                return { ...e, status: 'Approved' };
+            }
+            return e;
+        }));
     };
 
     const bulkApprove = (ids: string[]) => {
         const idSet = new Set(ids);
 
-        // [Integrity Engine V2] Atomic Validation & Responsibility Tracking
         setLedger(prev => prev.map(e => {
-            if (idSet.has(e.id)) {
-                // Perform simple checksum before finalizing (though real DB check is in Rust backup)
-                const isBalanced = Math.abs(e.amount + (e.vat || 0) - (e.amount + (e.vat || 0))) === 0; // Simple placeholder for transaction unit check
+            if (idSet.has(e.id) && e.status !== 'Approved') {
+                // [STRICT GATE] Skip if IDs are missing
+                const isComplex = e.complexLines && e.complexLines.length > 0;
+                const missingId = isComplex 
+                    ? e.complexLines?.some(cl => !cl.accountId)
+                    : (!e.debitAccountId || !e.creditAccountId);
+                
+                if (missingId) return e; 
+
+                // [AUTO-REGISTRATION] Detect New Partners on Bulk
+                if (e.vendor && e.vendor !== '-' && !partners.some(p => p.name === e.vendor)) {
+                    addPartner({
+                        id: `partner_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                        name: e.vendor,
+                        partnerType: e.type === 'Revenue' ? 'Customer' : 'Vendor',
+                        status: 'Pending',
+                        tags: ['Auto-Registered', 'Bulk']
+                    });
+                }
 
                 return {
                     ...e,
                     status: 'Approved',
                     ledgerType: 'Official',
-                    postedBy: 'CHIEF_FINANCIAL_OFFICER', // Recorded Authority
+                    postedBy: 'CHIEF_FINANCIAL_OFFICER',
                     postedAt: new Date().toISOString(),
-                    auditTrail: [...(e.auditTrail || []), `POSTed by CHIEF_FINANCIAL_OFFICER on ${new Date().toLocaleString()}: Balanced Integrity Verified.`]
+                    auditTrail: [...(e.auditTrail || []), `POSTed: Balanced Integrity Verified.`]
                 };
             }
             return e;
         }));
     };
 
+
     const holdEntry = (id: string) => {
+        const entry = ledger.find(e => e.id === id);
+        if (!entry) return;
+        if (isPeriodLocked(entry.date)) {
+            alert("마감된 기간의 전표는 수정할 수 없습니다.");
+            return;
+        }
+        if (entry.status === 'Approved') {
+            console.error("[MUTATION BLOCKED] Approved entries cannot be placed on hold.");
+            return;
+        }
         setLedger(prev => prev.map(e => e.id === id ? { ...e, status: 'Hold' } : e));
     };
 
     const deleteEntry = (id: string) => {
+        const entry = ledger.find(e => e.id === id);
+        if (!entry) return;
+        if (isPeriodLocked(entry.date)) {
+            alert("마감된 기간의 전표는 삭제할 수 없습니다.");
+            return;
+        }
+        if (entry.status === 'Approved') {
+            console.error("[MUTATION BLOCKED] Approved entries cannot be deleted. Use Reversal Entry instead.");
+            return;
+        }
         setLedger(prev => prev.filter(e => e.id !== id));
     };
 
     const updateEntry = (id: string, updates: Partial<JournalEntry>) => {
+        const entry = ledger.find(e => e.id === id);
+        if (!entry) return;
+        if (isPeriodLocked(entry.date)) {
+            alert("마감된 기간의 전표는 수정할 수 없습니다.");
+            return;
+        }
+        if (entry.status === 'Approved' && !updates.status) { // Only allow status changes (like cancellation) if needed, but block direct field updates
+            console.error("[MUTATION BLOCKED] Approved entries fields cannot be updated directly.");
+            return;
+        }
         setLedger(prev => prev.map(e => e.id === id ? { ...e, ...updates, version: (e.version || 1) + 1 } : e));
     };
 
@@ -164,18 +508,81 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         setScmOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
     };
 
-    const resetData = () => {
+    const resetData = useCallback(() => {
+        isInitialLoad.current = false; // Prevent auto-fill after manual reset
         setLedger([]);
         setInventory([]);
         setScmOrders([]);
         setAssets([]);
         setPartners([]);
         setStagingTransactions([]);
+        setFinalizedMonths({});
+        setSelectedDate(new Date().toISOString().split('T')[0]);
+        console.log("[AccountingFlow] Manual data reset performed. Global date reset to today. Auto-fill disabled.");
+    }, []);
+
+    const performClosing = (month: string, type: 'soft' | 'hard') => {
+        // [AUTO-DEPRECIATION] Generate entries for all registered assets for this period
+        const [year, monthNum] = month.split('-').map(Number);
+        const lastDay = new Date(year, monthNum, 0).getDate();
+        const closingDate = `${month}-${String(lastDay).padStart(2, '0')}`;
+
+        const depreciationEntries: JournalEntry[] = [];
+        
+        assets.forEach(asset => {
+            const acqDateStr = asset.acquisitionDate;
+            const acqDate = new Date(acqDateStr);
+            const periodDate = new Date(year, monthNum - 1, 15); // Middle of closing month
+
+            if (acqDate <= periodDate) {
+                // Calculate if already depreciated for this month
+                const existing = ledger.find(e => 
+                    e.date.startsWith(month) && 
+                    e.description.includes(`[결산] ${asset.name} 감가상각`)
+                );
+
+                if (!existing) {
+                    const monthlyDep = Math.floor(asset.cost / (asset.usefulLife * 12));
+                    const isIntangible = asset.name.includes('특허') || asset.name.includes('지식재산');
+                    
+                    depreciationEntries.push({
+                        id: `AUTO-DEP-${asset.id}-${month}`,
+                        date: closingDate,
+                        description: `[결산] ${asset.name} 감가상각비 반영 (자동 생성)`,
+                        vendor: 'N/A',
+                        debitAccount: isIntangible ? '무형자산상각비' : '감가상각비',
+                        debitAccountId: isIntangible ? 'acc_845' : 'acc_831',
+                        creditAccount: '감가상각누계액',
+                        creditAccountId: 'acc_213',
+                        amount: monthlyDep,
+                        vat: 0,
+                        type: 'Expense',
+                        status: 'Approved',
+                        auditTrail: ['AI Automated Period End Adjustment: Depreciation calculated.']
+                    });
+                }
+            }
+        });
+
+        if (depreciationEntries.length > 0) {
+            setLedger(prev => [...prev, ...depreciationEntries]);
+        }
+
+        setFinalizedMonths(prev => ({ ...prev, [month]: type }));
     };
 
-    React.useEffect(() => {
+    const reopenMonth = (month: string) => {
+        setFinalizedMonths(prev => {
+            const next = { ...prev };
+            delete next[month];
+            return next;
+        });
+    };
+
+    useEffect(() => {
         (window as any).resetData = resetData;
-    }, []);
+        (window as any).useAccounting = () => ({ resetData }); // Expose for Dashboard
+    }, [resetData]);
 
     const attachEvidence = (id: string, url: string) => {
         setLedger(prev => prev.map(e => e.id === id ? { ...e, attachmentUrl: url, version: (e.version || 1) + 1 } : e));
@@ -258,6 +665,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     };
 
     const loadSimulation = (result: Partial<SimulationResult>) => {
+        isInitialLoad.current = false; // Any simulation load should disable auto-init
         console.log("[AccountingContext] loadSimulation called with:", result);
         if (result.ledger) {
             console.log("[AccountingContext] Ledger found in result, count:", result.ledger.length);
@@ -286,126 +694,53 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         }
     };
 
-    // G/L (General Ledger) contains all 'Approved' status transactions.
-    // We allow entries without vendors (internal) to also appear in the ledger.
+    // [STRICT] Physical Ledger Pipeline (Journal -> Physical Ledger)
+    // Uses Immutable Core unroll logic
+    const accountingLedger = useMemo(() => {
+        return unrollJournalToLedger(ledger);
+    }, [ledger]);
+
+    const allLinesLedger = useMemo(() => {
+        return unrollJournalToLedger(ledger, true);
+    }, [ledger]);
+
+    // Backward compatibility for components expecting JournalEntry[]
+    // subLedger now represents the 'physical' ledger lines that are approved and within the selected date
     const subLedger = useMemo(() => {
-        return ledger.filter(entry => entry.status === 'Approved');
-    }, [ledger]);
+        return accountingLedger.filter(line => line.date <= selectedDate);
+    }, [accountingLedger, selectedDate]);
 
-    // Initialized as empty for dynamic data migration
+    // [STRICT] Ledger -> Trial Balance Pipeline
+    const trialBalance = useMemo(() => {
+        const currentYear = selectedDate.split('-')[0];
+        const periodStart = `${currentYear}-01-01`;
+        return calculateTrialBalance(accountingLedger, periodStart, selectedDate, 'actual', accounts);
+    }, [accountingLedger, selectedDate, accounts]);
 
+    const calculateTBForRange = (start: string, end: string, scope: 'actual' | 'scenario' = 'actual') => {
+        return calculateTrialBalance(accountingLedger, start, end, scope, accounts);
+    };
+
+    const addAccount = (acc: AccountDefinition) => {
+        setAccounts(prev => ({ ...prev, [acc.name]: acc }));
+    };
+
+    const updateAccount = (name: string, updates: Partial<AccountDefinition>) => {
+        setAccounts(prev => {
+            if (!prev[name]) return prev;
+            return { ...prev, [name]: { ...prev[name], ...updates } };
+        });
+    };
+
+    const updateCompanyKnowledge = (knowledge: string) => {
+        setCompanyKnowledge(knowledge);
+        localStorage.setItem('accounting_company_knowledge', knowledge);
+    };
+
+    // [STRICT] TB -> FS Pipeline
     const financials = useMemo(() => {
-        let cash = 0;
-        let ar = 0;
-        let inventoryValue = 0;
-        let fixedAssets = 0;
-        let vatPayable = 0;
-        let vatReceivable = 0;
-        let ap = 0;
-        let otherLiabilities = 0;
-        let capital = 0;
-        let revenue = 0;
-        let expenses = 0;
-
-        const approvedLedger = ledger.filter(e => e.status === 'Approved');
-        console.log(`[Financials] Aggregating ${approvedLedger.length} approved entries out of ${ledger.length} total.`);
-
-
-        approvedLedger.forEach((entry, idx) => {
-            if (idx === 0) {
-                console.log("[AccountingContext] First Entry Keys:", Object.keys(entry));
-                console.log("[AccountingContext] First Entry Sample:", entry);
-            }
-            const totalAmount = entry.amount + (entry.vat || 0);
-
-            const processAccount = (acc: string, amount: number, isDebit: boolean) => {
-                const multiplier = isDebit ? 1 : -1;
-                const lowAcc = (acc || '').toLowerCase().trim();
-
-                // [Antigravity] Debug: Trace Cash Flow
-                if (lowAcc.includes('보통') || lowAcc.includes('예금') || lowAcc.includes('현금')) {
-                    console.log(`[Financials] Cash Event: ${entry.date} | ${lowAcc} | ${isDebit ? 'Debit' : 'Credit'} | ${amount}`);
-                }
-
-                // 1. Asset/Liability/Equity accounts usually track the TOTAL flow (Cash, AR, AP)
-                // Added '보통' (Common), '저축' (Savings), '입출금' (Checking)
-                if (lowAcc.includes('현금') || lowAcc.includes('예금') || lowAcc === 'cash' || lowAcc.includes('bank') || lowAcc.includes('보통') || lowAcc.includes('저축') || lowAcc.includes('입출금')) {
-                    cash += (amount * multiplier);
-                } else if (lowAcc.includes('외상매출') || lowAcc.includes('미수') || lowAcc.includes('receivable')) {
-                    ar += (amount * multiplier);
-                } else if (lowAcc.includes('상품') || lowAcc.includes('재고') || lowAcc.includes('재료') || lowAcc.includes('inventory')) {
-                    inventoryValue += (isDebit ? entry.amount : -entry.amount);
-                } else if (lowAcc.includes('비품') || lowAcc.includes('기계') || lowAcc.includes('장치') || lowAcc.includes('차량') || lowAcc.includes('건물') || lowAcc.includes('asset')) {
-                    fixedAssets += (isDebit ? entry.amount : -entry.amount);
-                } else if (lowAcc.includes('부가세') && lowAcc.includes('대급')) {
-                    vatReceivable += (amount * multiplier);
-                } else if (lowAcc.includes('외상매입') || lowAcc.includes('미지급') || lowAcc.includes('payable')) {
-                    ap += (amount * -multiplier);
-                } else if (lowAcc.includes('부가세') && lowAcc.includes('예수')) {
-                    vatPayable += (amount * -multiplier);
-                } else if (lowAcc.includes('차입') || lowAcc.includes('예수금') || lowAcc.includes('부채') || lowAcc.includes('loan')) {
-                    otherLiabilities += (amount * -multiplier);
-                } else if (lowAcc.includes('자본') || lowAcc.includes('equity') || lowAcc.includes('stock')) {
-                    capital += (amount * -multiplier);
-                }
-                // 2. Revenue/Expense accounts track the BASE amount
-                else if (entry.type === 'Revenue' || lowAcc.includes('매출') || lowAcc.includes('수익') || lowAcc.includes('revenue')) {
-                    if (!isDebit) revenue += entry.amount; else revenue -= entry.amount;
-                } else if (entry.type === 'Expense' || entry.type === 'Payroll' || lowAcc.includes('비용') || lowAcc.includes('급여') || lowAcc.includes('료') || lowAcc.includes('비') || lowAcc.includes('expense')) {
-                    if (isDebit) expenses += entry.amount; else expenses -= entry.amount;
-                }
-            };
-
-            // Call with totalAmount for balancing, then internal logic separates it
-            processAccount(entry.debitAccount, totalAmount, true);
-            processAccount(entry.creditAccount, totalAmount, false);
-
-            // Explicit VAT tracking to balance the equation
-            if (entry.vat > 0) {
-                if (entry.type === 'Revenue') {
-                    vatPayable += entry.vat;
-                } else if (entry.type === 'Expense' || entry.type === 'Asset') {
-                    vatReceivable += entry.vat;
-                }
-            }
-        });
-
-        console.log(`[Financials] Aggregation Complete. Cash: ${cash}, AR: ${ar}, AP: ${ap}, Capital: ${capital}`);
-
-        const netIncome = revenue - expenses;
-        const totalAssets = cash + ar + inventoryValue + fixedAssets + vatReceivable;
-        const totalLiabilities = ap + vatPayable + otherLiabilities;
-        const totalEquity = capital + netIncome;
-
-        // "Truthful" Cash: Cash - Accounts Payable - VAT Payable - (Government Grant balance which is restricted)
-        // We find Grant Cash by looking for transactions with "보조금" or "출연금"
-        let totalGrantCash = 0;
-        approvedLedger.forEach(e => {
-            const isGrant = e.description.includes('보조금') || e.description.includes('출연금');
-            if (isGrant) {
-                if (e.creditAccount.includes('보조금') || e.creditAccount.includes('출연금')) {
-                    totalGrantCash += e.amount;
-                }
-                if (e.debitAccount.includes('보조금') || e.debitAccount.includes('출연금')) {
-                    totalGrantCash -= e.amount;
-                }
-            }
-        });
-
-        const realAvailableCash = Math.max(0, cash - ap - vatPayable - totalGrantCash);
-
-        return {
-            cash, revenue, expenses, ar, ap,
-            fixedAssets, vatNet: vatPayable - vatReceivable,
-            netIncome, capital, retainedEarnings: netIncome,
-            totalEquity,
-            inventoryValue,
-            totalAssets,
-            totalLiabilities,
-            realAvailableCash,
-            totalGrantCash
-        };
-    }, [ledger]);
+        return calculateFinancialsFromTB(trialBalance);
+    }, [trialBalance]);
 
     return (
         <AccountingContext.Provider value={{
@@ -419,6 +754,9 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             addPartner,
             updatePartner,
             financials,
+            accounts,
+            addAccount,
+            updateAccount,
             loadSimulation,
             approvePartner,
             approveEntry,
@@ -439,9 +777,48 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             setStagingTransactions,
             subLedger,
             inventory,
-            transactions: ledger
+            transactions: ledger,
+            finalizedMonths,
+            performClosing,
+            reopenMonth,
+            activeTab,
+            selectedDate,
+            setSelectedDate,
+            setTab,
+            trialBalance,
+            accountingLedger,
+            calculateTBForRange,
+            isPeriodLocked,
+            isDev,
+            allLinesLedger,
+            companyKnowledge,
+            updateCompanyKnowledge,
+            baselineSnapshot,
+            setBaselineSnapshot,
+            scenarioResults,
+            setScenarioResults,
+            baselineEntries,
+            setBaselineEntries,
+            baselineTimestamp,
+            setBaselineTimestamp,
+            revenueMult,
+            setRevenueMult,
+            expenseMult,
+            setExpenseMult,
+            fixedCostDelta,
+            setFixedCostDelta,
+            preMoneyValuation,
+            setPreMoneyValuation,
+            projectionMonths,
+            setProjectionMonths,
+            macro,
+            setMacro,
+            founderInitialOwnership,
+            setFounderInitialOwnership,
+            investmentAmount,
+            setInvestmentAmount
         }}>
             {children}
-        </AccountingContext.Provider>
+</AccountingContext.Provider>
     );
 };

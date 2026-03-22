@@ -335,7 +335,7 @@ export const SCM: React.FC<{ setTab?: (tab: string) => void }> = ({ setTab }) =>
             <div className="bg-[#151D2E] border border-white/5 p-8 rounded-[2rem] shadow-xl">
                 <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-3">
                     <HistoryIcon className="text-indigo-400" />
-                    SCM 실시간 감사 추적 (Audit Trail)
+                    SCM 실시간 무결성 추적 (Change Log)
                 </h3>
                 <div className="space-y-4">
                     <div className="flex items-center justify-between text-xs py-2 border-b border-white/5 last:border-0">

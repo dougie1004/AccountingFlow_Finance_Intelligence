@@ -1,4 +1,4 @@
-﻿use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -18,7 +18,7 @@ pub enum LedgerScope {
     Scenario, // What-if strategic simulation data
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScenarioAssumption {
     pub key: String,         // e.g., "revenue_multiplier", "fixed_cost_delta"
@@ -26,7 +26,7 @@ pub struct ScenarioAssumption {
     pub description: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScenarioDefinition {
     pub id: String,
@@ -36,7 +36,25 @@ pub struct ScenarioDefinition {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfidenceLevel {
+    #[default]
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationSuggestion {
+    pub suggested_account: Option<String>,
+    pub suggested_payment_method: Option<String>,
+    pub confidence: ConfidenceLevel,
+    pub reasoning: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedTransaction {
     pub date: Option<String>,
@@ -57,6 +75,7 @@ pub struct ParsedTransaction {
     pub vendor_address: Option<String>,
     pub reasoning: String,
     pub account_name: Option<String>,
+    pub suggestion: Option<ClassificationSuggestion>,
     #[serde(default)]
     pub needs_clarification: bool,
     pub clarification_prompt: Option<String>,
@@ -83,6 +102,9 @@ pub struct ParsedTransaction {
     pub employee_tags: Vec<String>,
     #[serde(default)]
     pub is_insurance_part: bool,
+    #[serde(default)]
+    pub is_journal_mode: bool,
+    pub position: Option<String>,
 
     // [CFO Architecture] Ledger Isolation
     #[serde(default = "default_ledger_scope")]
@@ -94,7 +116,7 @@ fn default_ledger_scope() -> LedgerScope {
     LedgerScope::Actual
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalEntry {
     pub id: String,
@@ -103,6 +125,7 @@ pub struct JournalEntry {
     pub vendor: Option<String>,
     pub debit_account: String,
     pub credit_account: String,
+    pub position: Option<String>,
     pub amount: f64,
     pub vat: f64,
     #[serde(rename = "type")]
@@ -115,6 +138,7 @@ pub struct JournalEntry {
     pub attachment_url: Option<String>,
     pub ocr_data: Option<String>,
     pub compliance_context: Option<String>,
+    pub matching_status: Option<String>,
     #[serde(default)]
     pub tax_base_amount: Option<f64>,
     #[serde(default)]
@@ -130,12 +154,34 @@ pub struct JournalEntry {
     pub is_insurance_part: bool,
 
     // [CFO Architecture] Ledger Isolation
+    pub debit_account_id: Option<String>,
+    pub credit_account_id: Option<String>,
     #[serde(default = "default_ledger_scope")]
     pub scope: LedgerScope,
     pub scenario_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FinancialSummary {
+    pub cash: f64,
+    pub revenue: f64,
+    pub expenses: f64,
+    pub ar: f64,
+    pub ap: f64,
+    pub net_income: f64,
+    pub capital: f64,
+    pub retained_earnings: f64,
+    pub fixed_assets: f64,
+    pub vat_net: f64,
+    pub total_equity: f64,
+    pub inventory_value: f64,
+    pub total_assets: f64,
+    pub total_liabilities: f64,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EntityMetadata {
     pub company_name: String,
@@ -149,7 +195,7 @@ pub struct EntityMetadata {
     pub num_employees: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxPolicy {
     pub depreciation_method: String,
@@ -159,8 +205,7 @@ pub struct TaxPolicy {
     pub insurance_rates: Option<InsuranceRates>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct InsuranceRates {
     pub national_pension: f64, // e.g. 0.045
     pub health_insurance: f64, 
@@ -169,14 +214,13 @@ pub struct InsuranceRates {
     pub employment_insurance_employer: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct InitialBalance {
     pub account: String,
     pub amount: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TenantConfig {
     pub tenant_id: String,
@@ -191,7 +235,7 @@ pub struct TenantConfig {
     pub initial_balances: Vec<InitialBalance>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulationResult {
     pub ledger: Vec<JournalEntry>,
@@ -202,7 +246,7 @@ pub struct SimulationResult {
     pub company_config: TenantConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaxAdjustment {
     pub category: String,
@@ -213,7 +257,7 @@ pub struct TaxAdjustment {
     pub disposal: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisResponse {
     pub transaction: Option<ParsedTransaction>,
@@ -222,7 +266,7 @@ pub struct AnalysisResponse {
     pub compliance_review: Option<ComplianceReview>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Partner {
     pub id: String,
@@ -233,7 +277,7 @@ pub struct Partner {
     pub reg_no: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderItem {
     pub sku: String,
@@ -242,7 +286,7 @@ pub struct OrderItem {
     pub amount: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
     pub id: String,
@@ -255,7 +299,7 @@ pub struct Order {
     pub vat: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
     pub id: String,
@@ -272,7 +316,7 @@ pub struct Asset {
     pub is_sme_special_life: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DepreciationScheduleItem {
     pub period: String,
@@ -284,14 +328,14 @@ pub struct DepreciationScheduleItem {
     pub disallowed_amount: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetSchedule {
     pub asset_id: String,
     pub items: Vec<DepreciationScheduleItem>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryBatch {
     pub id: String,
@@ -300,7 +344,7 @@ pub struct InventoryBatch {
     pub unit_cost: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InventoryItem {
     pub id: String,
@@ -312,7 +356,7 @@ pub struct InventoryItem {
     pub last_nrv: Option<f64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ComplianceReview {
     pub status: String,
@@ -320,7 +364,7 @@ pub struct ComplianceReview {
     pub review_logs: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditSnapshot {
     pub total_amount: f64,
@@ -331,7 +375,7 @@ pub struct AuditSnapshot {
     pub adjustments: Vec<TaxAdjustment>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ValidationResult {
     pub status: String,
@@ -339,7 +383,7 @@ pub struct ValidationResult {
     pub field: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct TaxFilingPackage {
     pub xml_content: String,
     pub pii_density: f32,
@@ -366,7 +410,7 @@ pub struct AuditIssue {
     pub remediation_plan: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct AuditEntity {
     pub id: u32,
     pub unit_name: String,
@@ -379,7 +423,7 @@ pub struct AuditEntity {
     pub ai_risk_analysis: AiRiskAnalysis,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct AiRiskAnalysis {
     pub reason: String,
     pub impact_score: f32,
@@ -390,16 +434,14 @@ pub struct AiRiskAnalysis {
     pub reference_standard: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct ImpactBreakdown {
     pub financial_loss: f32,
     pub strategic_impact: f32,
     pub reputation_risk: f32,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct LikelihoodBreakdown {
     pub historical_frequency: f32,
     pub control_weakness: f32,
@@ -418,4 +460,25 @@ pub struct Scenario {
     pub origin_department: String,
     pub detected_date: String,
     pub is_ai_generated: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseCheck {
+    pub name: String,
+    pub status: String, // "PASSED", "WARNING", "BLOCKER"
+    pub message: String,
+    pub value: Option<String>,
+    pub affected_ids: Vec<String>, // [PROD READY] For UI navigation
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseReadinessReport {
+    pub status: String, // "OPEN", "READY", "BLOCKED"
+    pub score: i32,
+    pub checks: Vec<CloseCheck>,
+    pub warnings: Vec<String>,
+    pub blockers: Vec<String>,
+    pub period: String,
 }

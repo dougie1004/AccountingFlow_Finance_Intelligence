@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== 'POST') {
@@ -8,7 +8,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!GEMINI_API_KEY) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on Vercel' });
+        return res.status(500).json({ error: 'Cognitive Engine Key is not configured on Vercel' });
     }
 
     const { action, payload } = req.body;
@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (action === 'parse') {
             const { input, policy, imageBytes, imageMime } = payload;
-            prompt = `당신은 숙련된 공인회계사(KICPA)이자 SME 전문 세무 조력자입니다. 사용자의 텍스트 입력과 증빙을 분석하여 '세무 신고'가 가능한 수준의 정교한 전표를 생성하세요.
+            prompt = `당신은 지능형 금융 인공지능(Neural CFO Engine)이자 규정 준수 조력자입니다. 사용자의 텍스트 입력과 증빙을 분석하여 '세무 신고'가 가능한 수준의 정교한 전표를 생성하세요.
 
   핵심 계정과목 가이드라인 (accountName에 반드시 사용):
   [자산] 보통예금, 현금, 외상매출금, 미수금, 선급금, 가지급금, 상품, 원재료, 재고자산, 비품, 차량운반구, 소프트웨어, 임차보증금
@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
         } else if (action === 'batch_parse') {
             const { rows, policy } = payload;
-            prompt = `당신은 숙련된 공인회계사(KICPA)입니다. 다음의 원본 데이터 목록을 분석하여 표준화된 회계 전표(JSON 배열)로 변환하세요.
+            prompt = `당신은 고성능 금융 분석 AI(Cognitive Ledger Agent)입니다. 다음의 원본 데이터 목록을 분석하여 표준화된 회계 전표(JSON 배열)로 변환하세요.
 
  가이드라인:
  - **수익(Revenue) 인식**: '판매', '매출', '수지', '입금' 등의 단어가 포함된 행은 반드시 entryType: "Revenue"로 분류하고 accountName은 '상품매출' 또는 '서비스매출'을 부여하세요.
@@ -118,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         while (attempts < maxAttempts) {
             attempts++;
             try {
-                const modelName = process.env.AI_MODEL_NAME || 'gemini-2.0-flash-exp';
+                const modelName = process.env.AI_MODEL_NAME || process.env.VITE_AI_MODEL_NAME || 'gemini-2.0-flash-exp';
                 console.log(`[AI API] Sending request to ${modelName} (Attempt ${attempts})`);
 
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`, {

@@ -3,6 +3,7 @@ use crate::core::models::ParsedTransaction;
 use csv::ReaderBuilder;
 use std::io::Cursor;
 use calamine::{Reader, Xlsx};
+use chrono;
 
 fn normalize_key(s: &str) -> String {
     s.to_lowercase()
@@ -66,9 +67,23 @@ pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
              mapping.insert(header.clone(), "dr_cr".to_string());
         }
         // [Antigravity] Re-mapping: Account Name / Subject (Prioritize over Bank Account)
-        // Check for 'account' separately as it usually means Subject in generic CSVs, unless it explicitly says 'bank' or 'number'
         else if h_norm == "account" || h_norm.contains("계정과목") || h_norm.contains("acct") || h_norm.contains("subject") {
             mapping.insert(header.clone(), "account_name".to_string());
+        }
+        // 10. Explicit Journal Entry Mode (Debit/Credit Accounts)
+        else if h_norm.contains("debitaccount") || h_norm.contains("차변계정") {
+            mapping.insert(header.clone(), "debit_account".to_string());
+        }
+        else if h_norm.contains("creditaccount") || h_norm.contains("대변계정") {
+            mapping.insert(header.clone(), "credit_account".to_string());
+        }
+        // 11. VAT
+        else if h_norm == "vat" || h_norm.contains("부가세") || h_norm.contains("세액") {
+            mapping.insert(header.clone(), "vat".to_string());
+        }
+        // 12. Type
+        else if h_norm == "type" || h_norm.contains("유형") {
+            mapping.insert(header.clone(), "entry_type".to_string());
         }
         // Fallback for Bank Account if it contains 'account' but wasn't caught above
         else if h_norm.contains("account") {
@@ -276,8 +291,8 @@ pub fn process_with_mapping(
         
         if col_map.is_empty() { return Err("매핑된 헤더를 찾을 수 없습니다.".to_string()); }
 
-        for row in rows.into_iter().skip(start_idx) {
-            if let Some(tx) = row_to_tx(&row, &col_map, &global_desc) {
+        for (i, row) in rows.into_iter().skip(start_idx).enumerate() {
+            if let Some(tx) = row_to_tx(&row, &col_map, &global_desc, file_name, i + start_idx + 1) {
                 results.push(tx);
             }
         }
@@ -331,7 +346,7 @@ pub fn process_with_mapping(
                  else if process_row[0].contains(';') { process_row = smart_split(&process_row[0], b';'); }
              }
 
-             if let Some(tx) = row_to_tx(&process_row, &col_map, &global_desc) {
+             if let Some(tx) = row_to_tx(&process_row, &col_map, &global_desc, file_name, idx + start_idx + 1) {
                  results.push(tx);
              } else {
                  if !process_row.iter().all(|s| s.is_empty()) {
@@ -391,7 +406,7 @@ fn build_index_map(headers: &[String], mapping: &HashMap<String, String>) -> Has
     index_map
 }
 
-fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str) -> Option<ParsedTransaction> {
+fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str, file_name: &str, row_idx: usize) -> Option<ParsedTransaction> {
     let date_raw = col_map.get("tx_date").and_then(|&i| row.get(i)).cloned().unwrap_or_default();
     let amount_raw = col_map.get("amount").and_then(|&i| row.get(i)).cloned().unwrap_or_default();
     let vendor = col_map.get("vendor").and_then(|&i| row.get(i)).cloned().unwrap_or_else(|| "기타".to_string());
@@ -408,8 +423,15 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     let category = col_map.get("category").and_then(|&i| row.get(i)).cloned();
     let account_subject = col_map.get("account_name").and_then(|&i| row.get(i)).cloned(); // [Antigravity] Extract Subject
 
+    // Journal Entry Specifics
+    let debit_account_mapped = col_map.get("debit_account").and_then(|&i| row.get(i)).cloned();
+    let credit_account_mapped = col_map.get("credit_account").and_then(|&i| row.get(i)).cloned();
+    let vat_raw = col_map.get("vat").and_then(|&i| row.get(i)).cloned();
+    let entry_type_mapped = col_map.get("entry_type").and_then(|&i| row.get(i)).cloned();
+
     let clean_date = sanitize_date(&date_raw);
     let clean_amount = sanitize_amount(&amount_raw);
+    let clean_vat = vat_raw.as_ref().map(|v| sanitize_amount(v)).unwrap_or((clean_amount.abs() / 11.0).round());
 
     // [Antigravity] Survival-mode Validation
     // 1. Skip rows that look like document titles or summaries
@@ -423,86 +445,125 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
         return None;
     }
 
-    let debit_account = "미확정 비용".to_string(); // Default for Expense
-    let mut credit_account = "미지급금".to_string(); // Default as Unpaid
+    let is_journal_mode = debit_account_mapped.is_some() || credit_account_mapped.is_some();
+    let mut debit_account = debit_account_mapped.clone();
+    let mut credit_account = credit_account_mapped.clone();
 
-    // 1. Determine Payment Status
-    if let Some(ref method) = payment {
-        let m = method.to_lowercase();
-        if m.contains("현금") || m.contains("cash") {
-            credit_account = "현금".to_string();
-        } else if m.contains("이체") || m.contains("transfer") || m.contains("통장") {
-            credit_account = "보통예금".to_string();
-        } else if m.contains("카드") || m.contains("card") || m.contains("신용") {
-            credit_account = "미지급금".to_string();
-        } else if m.contains("승인") { 
-            credit_account = "미지급금".to_string();
+    // In journal mode, be sparse. In smart mode, apply defaults.
+    if !is_journal_mode {
+        if debit_account.is_none() { debit_account = Some("미확정 비용".to_string()); }
+        if credit_account.is_none() { credit_account = Some("미지급금".to_string()); }
+    }
+
+    // 1. Determine Payment Status (Only if not in explicit journal mode)
+    if !is_journal_mode {
+        if let Some(ref method) = payment {
+            let m = method.to_lowercase();
+            if m.contains("현금") || m.contains("cash") {
+                credit_account = Some("현금".to_string());
+            } else if m.contains("이체") || m.contains("transfer") || m.contains("통장") {
+                credit_account = Some("보통예금".to_string());
+            } else if m.contains("카드") || m.contains("card") || m.contains("신용") {
+                credit_account = Some("미지급금".to_string());
+            } else if m.contains("승인") { 
+                credit_account = Some("미지급금".to_string());
+            }
         }
     }
 
     let mut tx = ParsedTransaction {
         date: Some(clean_date.clone()),
         amount: clean_amount.abs(),
-        vat: (clean_amount.abs() / 11.0).round(),
-        entry_type: if let Some(cat) = &category {
+        vat: clean_vat,
+        entry_type: if let Some(et) = entry_type_mapped {
+            Some(et)
+        } else if let Some(cat) = &category {
             // [Antigravity] Context Injection: Use mapped category as authoritative reference
             Some(cat.clone())
-        } else if clean_amount < 0.0 || desc.contains("매출") { 
-            credit_account = "매출".to_string(); // Revenue logic override
+        } else if !is_journal_mode && (clean_amount < 0.0 || desc.contains("매출") || desc.contains("수익")) { 
+            credit_account = Some("매출".to_string()); // Revenue logic override
             Some("Revenue".to_string())
+        } else if !is_journal_mode && (desc.contains("자본금") || desc.contains("납입") || desc.contains("투자")) {
+            credit_account = Some("자본금".to_string());
+            Some("Equity".to_string())
+        } else if is_journal_mode {
+            Some("Manual".to_string()) // In journal mode, we trust the accounts
         } else { 
             Some("Expense".to_string())
         },
         description: Some(desc.clone()),
         vendor: Some(vendor),
-        // [Antigravity] Account Name Priority: 1. CSV Explicit (account_subject) 2. Mapped Category default 3. Unconfirmed
         account_name: if let Some(subj) = account_subject { 
             Some(subj) 
+        } else if !is_journal_mode && (desc.contains("자본금") || desc.contains("납입") || desc.contains("투자")) {
+            Some("보통예금".to_string())
         } else { 
-            Some(debit_account.clone()) 
+            debit_account.clone()
         }, 
-        reasoning: if let Some(cat) = &category {
-            format!("DataConverter: Mapped from Category '{}'. (결제: {})", cat, credit_account)
+        reasoning: if is_journal_mode {
+            "Journal Import Mode: Direct mapping from Debit/Credit columns.".to_string()
+        } else if let Some(cat) = &category {
+            format!("Cognitive Ledger Engine: Mapped from Category '{}'. (Offset: {})", cat, credit_account.as_deref().unwrap_or("미지급금"))
         } else {
-            format!("DataConverter 스마트 변환 엔진으로 처리됨 (결제: {})", credit_account)
+            format!("Cognitive Ledger Engine (Pro) 스마트 변환 적용됨 (Offset: {})", credit_account.as_deref().unwrap_or("미지급금"))
         },
-        confidence: Some("High".to_string()),
+        confidence: Some(if is_journal_mode { "High".to_string() } else { "Medium".to_string() }),
         payment_method: payment,
         bank_name,
         bank_account,
-        audit_trail: vec!["#1 Data Mapping & Sanitization 완료".to_string()],
+        is_journal_mode,
+        position: if is_journal_mode {
+            if debit_account_mapped.is_some() && credit_account_mapped.is_none() { Some("Debit".to_string()) }
+            else if debit_account_mapped.is_none() && credit_account_mapped.is_some() { Some("Credit".to_string()) }
+            else { None }
+        } else { None },
+        debit_account: debit_account.clone(),
+        credit_account: credit_account.clone(),
+        audit_trail: vec![
+            format!("Source: {} (Row {})", file_name, row_idx),
+            format!("[{}] Ingestion: {}", chrono::Local::now().format("%H:%M:%S"), if is_journal_mode { "Journal Import" } else { "Smart Mapping" })
+        ],
         id: Some(crate::utils::id_generator::generate_id(&clean_date, crate::utils::id_generator::IdPrefix::AI)),
         ..Default::default()
     };
     
     // [Antigravity] Auto-Pairing Logic: Enforce Double-Entry Integrity
-    // If we have a single "account_name" (Subject), we must determine where the money came from/went to.
-    if let Some(cat) = &category {
-        let cat_lower = cat.to_lowercase();
-        if cat_lower == "equity" || cat_lower == "revenue" || cat_lower.contains("매출") || cat_lower.contains("자본") {
-            // Inflow -> Debit: Bank, Credit: Subject
-            tx.entry_type = Some(if cat_lower.contains("자본") { "Equity".to_string() } else { "Revenue".to_string() });
-            tx.debit_account = Some("보통예금".to_string());
-            tx.credit_account = tx.account_name.clone().or(Some("매출".to_string())); // Fallback
-        } else {
-            // Outflow -> Debit: Subject, Credit: Bank (or AP)
-            tx.entry_type = Some("Expense".to_string());
-            tx.debit_account = tx.account_name.clone().or(Some("미확정 비용".to_string()));
-            // If payment method allows, use Bank, otherwise AP
-            if credit_account == "미지급금" && (desc.contains("이체") || desc.contains("출금")) {
-                 tx.credit_account = Some("보통예금".to_string());
+    if !is_journal_mode {
+        if let Some(cat) = &category {
+            let cat_lower = cat.to_lowercase();
+            if cat_lower == "equity" || cat_lower == "revenue" || cat_lower.contains("매출") || cat_lower.contains("자본") {
+                // Inflow -> Debit: Bank, Credit: Subject
+                tx.entry_type = Some(if cat_lower.contains("자본") { "Equity".to_string() } else { "Revenue".to_string() });
+                tx.debit_account = Some("보통예금".to_string());
+                tx.credit_account = tx.account_name.clone().or(Some(if cat_lower.contains("자본") { "자본금".to_string() } else { "매출".to_string() })); // Fallback
             } else {
-                 tx.credit_account = Some(credit_account);
+                // Outflow -> Debit: Subject, Credit: Bank (or AP)
+                tx.entry_type = Some("Expense".to_string());
+                tx.debit_account = tx.account_name.clone().or(Some("미확정 비용".to_string()));
+                // If payment method allows, use Bank, otherwise AP
+                if credit_account.as_ref().map(|s| s == "미지급금").unwrap_or(false) && (desc.contains("이체") || desc.contains("출금") || desc.contains("체크") || desc.contains("계좌")) {
+                    tx.credit_account = Some("보통예금".to_string());
+                } else {
+                    tx.credit_account = credit_account.clone();
+                }
+            }
+        } else {
+            // Fallback if no category - apply smart offset based on description
+            if desc.contains("자본금") || desc.contains("납입") || desc.contains("투자") {
+                tx.debit_account = Some("보통예금".to_string());
+                tx.credit_account = Some("자본금".to_string());
+            } else if desc.contains("이체") || desc.contains("출금") || desc.contains("체크") || desc.contains("계좌") {
+                tx.debit_account = debit_account.clone();
+                tx.credit_account = Some("보통예금".to_string());
+            } else {
+                tx.debit_account = debit_account.clone();
+                tx.credit_account = credit_account.clone();
             }
         }
-    } else {
-        // Fallback if no category
-        tx.debit_account = Some(debit_account);
-        tx.credit_account = Some(credit_account);
     }
     
-    // Attempt rule based
-    crate::ai::rule_based_classifier::classify_by_rules(&mut tx);
+    // Attempt rule based (Suggestion Only)
+    tx.suggestion = crate::ai::rule_based_classifier::classify_by_rules(&tx);
     
     Some(tx)
 }

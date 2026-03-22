@@ -1,25 +1,31 @@
-Article 1. Every account must have exactly one Nature.
-Article 2. An account cannot belong to more than one financial statement section.
-Article 3. Financial statements must ignore account names and rely only on Nature.
-Article 4. Accounts without Nature must not be persisted or calculated.
-Article 5. Any violation must stop the calculation immediately.
-Article 6. [Grant Accountability] Voucher-based subsidies must never trigger cash inflows. Only self-funded portions (VAT) may impact the bank balance.
-Article 7. [Matching Principle] Grants related to fixed assets must be deferred and amortized in strict synchronization with the asset's depreciation schedule.
-Article 8. [Lease Integrity] Lease schedules must be followed precisely, separating principal repayment from interest expense.
-Article 9. [Revenue Strictness] Top-line 'Sales Revenue' must only include core operating income (e.g., Service, SaaS). Non-operating items like Grant Income or Miscellaneous Gains must be strictly excluded from the revenue category to prevent inflated business performance.
-Article 10. [Usage vs Recognition] Voucher usage metrics must represent actual 'Economic Consumption' (New Swipes/Liabilities). Accounting recognition (Amortization) is a non-cash flow and must not be double-counted in usage totalizers.
-Article 11. [Historical Continuity] Every data drill-down must include the 'Brought Forward' (Opening) balance. A view showing only period-movements without an opening balance is a violation of financial traceability.
-Article 12. [Lifetime Integrity of Strategic Metrics] Strategic dashboards (e.g., BEP, Payback Period) must be calculated based on the entire lifetime of the business history (2026~). Analyzing metrics based only on a filtered sub-period without accounting for cumulative losses is a violation of strategic truth and leads to false profitability claims.
-Article 13. [Grant Expiration & Prioritization] Government grants (Vouchers) have a fixed execution period (typically matching the project year). Simulations must prioritize grant consumption over bank cash during the valid period. Voucher usage after the project completion deadline (e.g., Early 2027 for a 2026 grant) is strictly prohibited to maintain regulatory realism.
-Article 14. [BvA Accountability] Every expenditure must be accountable against a pre-authorized Operation Plan (Budget). A systematic comparison between Planned (Budget) and Actual (Ledger) data must be performed monthly, with mandatory variance analysis to identify strategic or operational deviations.
-Article 15. [Integrity Mandate] All financial reports submitted externally must undergo verification through the Data Integrity Verification Center. Any document whose digital fingerprint (Hash) is missing or compromised is considered officially void, upholding the system's zero-trust transparency commitment.
-Article 16. [Absolute Separation of Cash and Equity] AI Forecasts and Runway calculations must strictly use the liquidated bank balance (Cash) as the calculation base. Under no circumstances shall Equity (Assets - Liabilities) or Net Asset Value be used as a proxy for available cash, even for closed periods. This prevents "Ghost Liability" errors where non-cash assets or accumulated losses distort the projection starting point.
-Article 17. [Business Plan Fidelity] All strategic simulations must strictly adhere to the "2026-2028 Master Business Plan":
-- **Revenue Model**: Tiered SaaS pricing (19.9k / 39.9k / 79k) with a 40:50:10 user ratio (Blended ARPU: 35,810 KRW).
-- **Operational Cost Base**: Monthly fixed costs (Labor 7.8M, Rent 1.56M, Ops 2M) and AI Variable costs (3,000 KRW per user).
-- **Growth Roadmap**: Paid user milestones of 60 (2026), 300 (2027), and 800 (2028).
-Deviation from these core parameters without explicit board-level override is a violation of the system's strategic baseline.
-Article 18. [Viability Guardrail] Every growth projection must reflect realistic unit economics (LTV/CAC > 3x, Churn 3-5%). A scenario that fails to reaching the operational BEP threshold (~500 users) by Year 3 is considered a "Strategic Failure" and must be flagged with a Red Alert for immediate intervention.
+# 📜 ACCOUNTINGFLOW CONSTITUTION v2.0
+> "Financial Integrity is the supreme law of AccountingFlow."
+
+---
+
+## 🏛️ PART I. THE PRIME DIRECTIVE
+
+### Article 0. [The Prime Directive]
+**Financial Integrity is the supreme law of AccountingFlow.** No feature, AI output, UI enhancement, or automation may override or bypass the deterministic accounting engine. In any conflict between "Intelligence" (AI) and "Integrity" (Engine), the Engine’s deterministic truth must prevail unconditionally.
+
+---
+
+## ⚖️ PART II. CORE ACCOUNTING PRINCIPLES
+
+### Article 1. [Atomic Nature]
+Every account must have exactly one Nature.
+
+### Article 2. [Section Exclusivity]
+An account cannot belong to more than one financial statement section.
+
+### Article 3. [Nature-Based Reporting]
+Financial statements must ignore account names and rely only on Nature for aggregation and classification.
+
+### Article 4. [Strict Persistence]
+Accounts without a defined Nature must not be persisted, calculated, or displayed in any formal report.
+
+### Article 5. [Zero Tolerance on Violation]
+Any violation of core accounting logic must stop the calculation engine immediately to prevent the propagation of financial errors.
 
 ---
 
@@ -176,12 +182,14 @@ Simulation must be conducted via the Box-Muller transform to sample burn rates f
 Article 33. [API Security & Secrets Management — Zero Hardcoding Policy]
 All API keys, secrets, tokens, credentials, and sensitive configuration values are classified as **Protected Information** and are subject to the following absolute rules:
 
-1. **Zero Hardcoding**: Under no circumstances may any API key, secret token, password, or credential be hardcoded as a string literal in source code (`.ts`, `.tsx`, `.rs`, `.js`, `.mjs`, `.toml`, or any other file). This applies to all environments including development, testing, and production. Violating this rule is an **unconditional breach** of system security.
+1. **Zero Hardcoding**: Under no circumstances may any API key, secret token, password, or credential be hardcoded as a string literal in source code. Violating this rule is an **unconditional breach** of system security.
 
-2. **Environment Variable Mandate**: All secrets must be read exclusively from:
-   - Frontend (Vite): `import.meta.env.VITE_*` sourced from `.env` file (never committed)
-   - Backend (Rust/Tauri): `std::env::var("KEY_NAME")` sourced from `src-tauri/.env` (never committed)
-   - The absence of a key must result in a clear error message. **Silent fallback to a hardcoded value is absolutely forbidden.**
+2. **Server-Side Secret Mandate (No Client Exposure)**: High-security secrets, specifically AI API keys (Gemini, etc.), must **never** be prefixed with `VITE_`. They must reside exclusively in the backend environment (Rust `.env` or Serverless Secrets) to prevent build-time leakage into client-side JavaScript bundles. Frontend hooks must access AI features only through secure backend bridges (Tauri Commands or Serverless Proxies).
+
+3. **Environment Variable Loading**:
+   - Backend (Rust/Tauri): Sourced dynamically from the project root `.env` via an explicit secure loader.
+   - Serverless (Vercel): Sourced from encrypted environment variables.
+   The absence of a key must result in a clear error message. **Silent fallback to any default or hardcoded value is strictly forbidden.**
 
 3. **`.gitignore` Enforcement**: The following must always be excluded from version control:
    - `.env`, `.env.local`, `.env.production`, `src-tauri/.env`
@@ -192,3 +200,21 @@ All API keys, secrets, tokens, credentials, and sensitive configuration values a
 5. **Key Rotation on Exposure**: If a key is ever committed to a repository (even briefly), it must be treated as **compromised and immediately rotated**. Deletion from git history alone is insufficient.
 
 > **Rationale**: A financial intelligence system that cannot protect its own secrets cannot be trusted to protect its clients' financial data. Security is not a feature — it is the foundation.
+
+Article 34. [UUID Supremacy - Identity over Naming]
+The system must decouple an account's identity from its human-readable name. All transaction posting, ledger aggregation, and financial reporting must rely exclusively on **Unique Account IDs (UUIDs)**. Account names are treated as transient metadata. Using names as primary keys in the accounting engine is a violation of Identity Integrity and leads to irreversible data fragmentation during rebrands or account splits.
+
+Article 35. [The Deterministic Chain of Truth]
+Financial data must flow through a strictly linear and deterministic pipeline: **Journal (Atomic Entry) ➔ Ledger (Chronological Aggregation) ➔ Trial Balance (Categorical Classification) ➔ Financial Statements (Strategic Summary)**. Any calculation that bypasses this chain (e.g., calculating FS directly from Journals) is a violation of the Audit Trail Mandate. The Ledger must be rebuildable at any time from Journals, producing the exact same financial state.
+
+Article 36. [Strategic Compass & Scenario Isolation]
+The accounting engine must maintain a physical or logical **Isolation Guard** between Actual Financials and Simulation Scenarios. Actual Ledger data is the sacred 'Source of Truth'. Simulations (Strategic Compass) must operate on non-persistent snapshots or distinct ledger scopes. Any scenario logic that mutates the primary ledger state without a user-authorized 'Actualize' command is a violation of Reality Integrity.
+
+Article 37. [Virtual Closing & Automatic Equity Roll-up]
+The system adopts a **Virtual Closing** architecture for monthly and annual finalization. Instead of manual closing journal entries that clutter the ledger, the engine must automatically calculate the period's Net Income and roll it into the 'Retained Earnings' (`acc_351`) account during TB/FS generation. This ensures that Equity always balances with Assets and Liabilities in real-time without requiring destructive manual adjustments.
+
+Article 38. [Strict Gate & Automated Integrity Rejection]
+Every entry attempting to transition to an 'Approved' status must pass through a **Strict Integrity Gate**. Any entry with missing UUIDs, unbalanced debits/credits, or invalid account mapping must be rejected by the engine automatically (Hard Reject). Silently allowing "soft" errors or "orphaned" entries into the Approved Ledger is a violation of Systemic Trust and is strictly prohibited.
+
+Article 39. [Git Prohibition for Recovery & Final Implementation Supremacy]
+**Git use for system recovery is strictly forbidden (git금지).** When a "Restore" or "Rollback" command is issued, the system must not rely on Git commits, which may contain outdated or unrefined iterations. Instead, recovery must be performed based on the **final version successfully implemented and verified within the current system context**. This ensures that the most advanced UI refinements, logic corrections, and "Golden State" configurations—which may not yet be committed—are preserved. Bypassing the system's internal "latest truth" in favor of potentially regressive Git snapshots is a violation of Evolutionary Integrity.

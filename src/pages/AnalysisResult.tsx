@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useContext } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+// Unused router imports removed
 import { useAutoSave, AutoSaveStatus } from '../hooks/useAutoSave';
 import {
     Loader2, Search, ArrowLeft,

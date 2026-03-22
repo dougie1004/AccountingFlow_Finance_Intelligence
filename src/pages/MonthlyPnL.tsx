@@ -1,110 +1,361 @@
-import React, { useState } from 'react';
-import { Download, Share2, Upload, Plus, Calculator, Settings2, BarChart3, TrendingUp, AlertTriangle } from 'lucide-react';
+import React, { useState, useMemo, useContext } from 'react';
+import { 
+    Download, TrendingUp, Zap, ArrowUpRight, MessageCircle, Layers, Target, Activity, Clock, Database, Table, Calculator as CalcIcon, Calculator
+} from 'lucide-react';
+import { MetricRegistry } from '../core/reporting/metricRegistry';
+import { ExplainableKPI } from '../components/shared/ExplainableKPI';
+import { AccountingContext } from '../context/AccountingContext';
+import { JournalEntry } from '../types';
+import { generateMultiYearSimulation } from '../core/simulation/journalGenerator';
+import { generateMonthlyPnL, MonthlyPnLRow } from '../core/reporting/generateMonthlyPnL';
+import { SCENARIO_CONFIGS } from '../core/simulation/scenarioConfigs';
 
 export const MonthlyPnL: React.FC = () => {
-    const [scenario, setScenario] = useState('Base');
+    const { ledger: actualLedger, selectedDate } = useContext(AccountingContext)!;
+    const [selectedYear, setSelectedYear] = useState<number | 'ALL'>('ALL');
+    const [selectedScenario, setSelectedScenario] = useState<string>('STANDARD');
+
+    const SCENARIO_PRESETS = [
+        { id: 'SURVIVAL', name: '생존 (Survival)', color: 'hover:bg-rose-500/20 text-rose-400 border-rose-500/30' },
+        { id: 'STANDARD', name: '표준 (Standard)', color: 'hover:bg-blue-500/20 text-blue-400 border-blue-500/30' },
+        { id: 'GROWTH', name: '성장 (Growth)', color: 'hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
+        { id: 'DEATH_VALLEY', name: '데스밸리 (Death Valley)', color: 'hover:bg-amber-500/20 text-amber-400 border-amber-500/30' }
+    ];
+
+    const formatCurrency = (val: number) => {
+        if (val === 0) return '0';
+        const formatted = new Intl.NumberFormat('ko-KR').format(Math.abs(val));
+        return val < 0 ? `(${formatted})` : formatted;
+    };
+
+    const analytics = useMemo(() => {
+        // Generate simulated ledger for the selected scenario
+        // Rules: In Simulation Mode, we use the pure generator.
+        const simulatedResult = generateMultiYearSimulation([2026, 2027, 2028], SCENARIO_CONFIGS[selectedScenario]);
+        const simLedger = simulatedResult.ledger;
+
+        const tableData = generateMonthlyPnL(simLedger, [2026, 2027, 2028], selectedDate);
+        
+        // [Dynamic Context] Filter data used for Sensitivity/Leverage based on Selected Year
+        const kpiBaseData = selectedYear === 'ALL' 
+            ? tableData 
+            : tableData.filter(r => r.month.startsWith(String(selectedYear)));
+
+        // Dynamic KPI Calculation (Operating Focus)
+        const bepMonth = tableData.find((r: MonthlyPnLRow) => r.revenue > 0 && r.operatingProfit > 0 && r.month >= '2026-05')?.month || 'N/A';
+        
+        const totalRevenue = kpiBaseData.reduce((sum: number, r: MonthlyPnLRow) => sum + r.revenue, 0);
+        const totalOpex = Math.abs(kpiBaseData.reduce((sum: number, r: MonthlyPnLRow) => sum + (r.payroll + r.marketing + r.rent + r.depreciation + r.misc), 0));
+        const totalNetProfit = kpiBaseData.reduce((sum: number, r: MonthlyPnLRow) => sum + r.netIncome, 0);
+        const totalSubRevenue = kpiBaseData.reduce((sum: number, r: MonthlyPnLRow) => sum + r.operatingRevenue, 0);
+        const totalCogs = Math.abs(kpiBaseData.reduce((sum: number, r: MonthlyPnLRow) => sum + r.cogs, 0));
+        const totalFullCost = totalOpex + totalCogs;
+        
+        const revenueLeverage = totalRevenue / (totalOpex || 1);
+        const netExpenseLeverage = totalSubRevenue > 0 ? totalFullCost / totalSubRevenue : 0;
+
+        // [V2.6] Cumulative BEP Calculation (Refined: Sustainable Profitability)
+        let runningNetIncome = 0;
+        let cumulativeBepMonth = 'N/A';
+        for (let i = 0; i < tableData.length; i++) {
+            const row = tableData[i];
+            runningNetIncome += row.netIncome;
+            
+            if (runningNetIncome >= 0) {
+                // Sustainability Condition: All subsequent monthly net incomes must be non-negative
+                const isSustainable = tableData.slice(i).every(r => r.netIncome >= 0);
+                if (isSustainable) {
+                    cumulativeBepMonth = row.month;
+                    break;
+                }
+            }
+        }
+
+        return {
+            tableData,
+            kpis: {
+                monthlyBep: bepMonth,
+                cumulativeBep: cumulativeBepMonth,
+                revenueLeverage: `${revenueLeverage.toFixed(2)}x`,
+                expenseLeverage: `${netExpenseLeverage.toFixed(2)}x`
+            },
+            totalNetProfit,
+            // [V2.6] Explainable Summary Results
+            metricResults: {
+                totalProfit: {
+                    value: totalNetProfit,
+                    inputs: { 'Revenue': totalRevenue, 'OPEX': totalOpex },
+                    formula: 'Revenue - OPEX',
+                    period: selectedYear === 'ALL' ? '3-Year Total' : `${selectedYear} Total`,
+                    dataSource: 'scenario' as any
+                },
+                leverage: {
+                    value: revenueLeverage,
+                    inputs: { 'Revenue': totalRevenue, 'Variable Costs': totalOpex },
+                    formula: 'Revenue / Variable Costs',
+                    period: 'Average',
+                    dataSource: 'scenario' as any
+                },
+                expenseLeverage: {
+                    value: netExpenseLeverage,
+                    inputs: { '운영 비용(Cost)': totalFullCost, '전용 매출(Subscription)': totalSubRevenue },
+                    formula: 'Operating Cost / Subscription Revenue',
+                    period: 'Average',
+                    dataSource: 'scenario' as any
+                },
+                cumulativeBep: {
+                    value: 0,
+                    inputs: { 'Peak Cumulative Profit': totalNetProfit, 'Break-even Point': cumulativeBepMonth },
+                    formula: 'Σ(Net Income) > 0',
+                    period: 'Life-to-Date (Projection)',
+                    dataSource: 'scenario' as any
+                }
+            }
+        };
+    }, [selectedScenario, selectedDate, selectedYear]);
+
+    const filteredTableData = useMemo(() => {
+        if (selectedYear === 'ALL') return analytics.tableData;
+        return analytics.tableData.filter(r => r.month.startsWith(String(selectedYear)));
+    }, [analytics.tableData, selectedYear]);
+
+    const totalRow = useMemo(() => {
+        const initial = {
+            revenue: 0, 
+            operatingRevenue: 0,
+            grantIncome: 0,
+            cogs: 0, 
+            grossProfit: 0, 
+            payroll: 0, 
+            marketing: 0, 
+            rent: 0,
+            depreciation: 0, 
+            misc: 0, 
+            operatingProfit: 0,
+            netIncome: 0, 
+            investment: 0, 
+            voucherExecution: 0, 
+            monthlyNetCashFlow: 0,
+            carryoverCash: 0
+        };
+        
+        const totals = filteredTableData.reduce((acc, r) => {
+            acc.revenue += r.revenue;
+            acc.operatingRevenue += r.operatingRevenue;
+            acc.grantIncome += r.grantIncome;
+            acc.cogs += r.cogs;
+            acc.grossProfit += r.grossProfit;
+            acc.payroll += r.payroll;
+            acc.marketing += r.marketing;
+            acc.rent += r.rent;
+            acc.depreciation += r.depreciation;
+            acc.misc += r.misc;
+            acc.operatingProfit += r.operatingProfit;
+            acc.netIncome += r.netIncome;
+            acc.investment += r.investment;
+            acc.voucherExecution += r.voucherExecution;
+            acc.monthlyNetCashFlow += r.monthlyNetCashFlow;
+            acc.carryoverCash = r.carryoverCash;
+            return acc;
+        }, initial);
+
+        return totals;
+    }, [filteredTableData]);
 
     return (
-        <div className="flex-1 bg-slate-900 min-h-screen text-slate-100 p-8">
-            <header className="flex flex-col gap-2 mb-8 border-b border-white/5 pb-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-sm uppercase tracking-wider">STRATEGIC FORECASTING</span>
+        <div className="flex-1 bg-[#0B1221] h-screen text-slate-100 flex flex-col p-8 pt-0 overflow-hidden relative">
+            {/* 1. Header Area (Fixed - Always Visible) */}
+            <div className="flex-shrink-0 bg-[#0B1221] pt-8 pb-6 space-y-8 border-b border-white/5 shadow-2xl z-20">
+                <header className="flex flex-col gap-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h1 className="text-3xl font-black text-white tracking-tighter italic">
+                                월별 손익 현황 (Monthly P&L)
+                            </h1>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em] mt-1">
+                                REAL-TIME LEDger BASED MONTHLY FINANCIAL ANALYSIS
+                            </p>
                         </div>
-                        <h1 className="text-3xl font-bold text-white tracking-tight">월별 손익 (3개년 시뮬레이션)</h1>
+                        <div className="flex items-center gap-3">
+                            <button className="flex items-center gap-2 px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black tracking-widest uppercase transition-all shadow-xl shadow-indigo-600/20 border border-indigo-400/30">
+                                <Download size={14} /> EXPORT
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        <button className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-white/5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-all">
-                            <Upload size={14} /> EXCEL IMPORT
-                        </button>
-                        <button className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-white/5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition-all">
-                            <Download size={14} /> EXPORT
-                        </button>
-                        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-bold text-white transition-all shadow-lg">
-                            <Plus size={14} /> NEW SCENARIO
-                        </button>
-                    </div>
-                </div>
 
-                <div className="flex gap-2 mt-4">
-                    {['Base', 'Best Case', 'Worst Case', 'Expansion Plan'].map(s => (
-                        <button
-                            key={s}
-                            onClick={() => setScenario(s)}
-                            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${scenario === s ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' : 'bg-slate-800 text-slate-400 border border-white/5 hover:bg-slate-700'}`}
-                        >
-                            {s} Baseline
-                        </button>
-                    ))}
-                </div>
-            </header>
-
-            <div className="bg-[#1A1F2B] border border-white/5 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-bold text-white">손익 시뮬레이션 모델 (P&L Model)</h3>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                        <Calculator size={14} /> 단위: 천원
-                    </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead>
-                            <tr className="border-b border-white/10 text-slate-400 font-bold bg-[#121620]">
-                                <th className="p-4 rounded-tl-lg">과목 (Account)</th>
-                                {Array.from({ length: 12 }).map((_, i) => (
-                                    <th key={i} className="p-4 text-right">{i + 1}월</th>
+                    {/* Sub-navigation & Filters */}
+                    <div className="flex items-center justify-between bg-[#151D2E]/50 border border-white/5 p-5 rounded-[2rem] backdrop-blur-xl">
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 px-4 py-1.5 bg-indigo-500/10 text-indigo-400 rounded-lg text-[10px] font-black uppercase border border-indigo-500/20">
+                                <Target size={12} /> SCENARIO SIMULATION
+                            </div>
+                            <div className="flex gap-2">
+                                {SCENARIO_PRESETS.map((p) => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => setSelectedScenario(p.id)}
+                                        className={`px-4 py-2 rounded-xl border text-[9px] font-black uppercase transition-all ${
+                                            selectedScenario === p.id 
+                                            ? 'bg-white/10 border-white/20 text-white shadow-lg' 
+                                            : 'bg-transparent border-transparent text-slate-500 hover:text-slate-300'
+                                        }`}
+                                    >
+                                        {p.name}
+                                    </button>
                                 ))}
-                                <th className="p-4 text-right text-indigo-400 rounded-tr-lg">연간 합계</th>
+                            </div>
+                        </div>
+                        <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
+                            {(['ALL', 2026, 2027, 2028] as const).map(year => (
+                                <button
+                                    key={year}
+                                    onClick={() => setSelectedYear(year)}
+                                    className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${selectedYear === year ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+                                >
+                                    {year === 'ALL' ? 'ALL' : `${year}Y`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </header>
+
+                {/* KPI Cards Row (Unified Registry Integration) */}
+                <div className="grid grid-cols-5 gap-6 px-1">
+                    <ExplainableKPI 
+                        label="BEP Detection" 
+                        result={{ value: 0, inputs: { 'Detected Month': analytics.kpis.monthlyBep }, formula: 'Detection: First Operating Profit > 0', period: 'Timeline Scan', dataSource: 'scenario' }}
+                        description="선택된 시뮬레이션 데이터 중 최초로 '영업 이익'이 양수가 되는 달입니다. 이 시점부터 회사는 외부 자금 수혈 없이도 생존이 가능해지는 구조적 전환점을 맞이합니다."
+                        color="text-indigo-400" icon={<Clock size={16} />} 
+                        formatValue={() => analytics.kpis.monthlyBep}
+                    />
+                    <ExplainableKPI 
+                        label="Projected Total Profit" 
+                        result={analytics.metricResults.totalProfit} 
+                        description="총 시계열(2026-2028) 동안의 누적 순이익 총계입니다. 보조금과 영업비용을 모두 반영한 최종 결과물로, 법인의 실질적인 잉여 현금 창출력을 나타냅니다."
+                        color={totalRow.netIncome >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+                        icon={<Activity size={16} />}
+                    />
+                    <ExplainableKPI 
+                        label="Revenue Leverage" 
+                        result={analytics.metricResults.leverage} 
+                        description="영업비용(OPEX) 한 단위를 투입했을 때 발생하는 매출액의 배수입니다. 이 수치가 높을수록 소액의 운영비용으로 고효율 성장이 가능한 '플랫폼형' 비즈니스 모델에 가깝습니다."
+                        color="text-blue-400" icon={<TrendingUp size={16} />}
+                        formatValue={(v) => `${v.toFixed(2)}x`}
+                    />
+                    <ExplainableKPI 
+                        label="Expense Leverage" 
+                        result={analytics.metricResults.expenseLeverage} 
+                        description="보조금을 제외한 순수 상품 매출액(Subscription) 대비 전체 운영 비용(매출원가 포함)의 비중입니다. 1.0x보다 낮을수록 본업의 수익만으로도 모든 운영비를 충당할 수 있음을 의미합니다."
+                        color="text-amber-400" icon={<Zap size={16} />}
+                        formatValue={(v) => `${v.toFixed(2)}x`}
+                    />
+                    
+                    <ExplainableKPI 
+                        label="Cumulative BEP" 
+                        result={analytics.metricResults.cumulativeBep} 
+                        description="회적 이익(Total Net Income)이 최초로 양전환되는 시점입니다. 초기 투자비용과 영업손실을 모두 회수하고 법인이 실질적인 수익 구간에 진입하는 시기를 의미합니다."
+                        color="text-purple-400" icon={<Layers size={16} />}
+                        formatValue={() => analytics.kpis.cumulativeBep}
+                    />
+                </div>
+            </div>
+
+            {/* 2. Main Table Content (Independent Scroll) */}
+            <div className="flex-1 min-h-0 bg-[#151D2E] rounded-[2.5rem] border border-white/5 shadow-2xl mt-8 overflow-hidden">
+                <div className="h-full overflow-auto custom-scrollbar">
+                    <table className="w-full text-left border-collapse min-w-[2200px]">
+                        <thead className="sticky top-0 z-30 shadow-md">
+                            <tr className="bg-[#0B1221] border-b border-white/5 uppercase text-[9px] font-black text-slate-500 tracking-widest">
+                                <th className="p-5 sticky left-0 bg-[#0B1221] z-40 w-[120px]">Period</th>
+                                <th className="p-5 bg-[#0B1221]">상품 매출액 (Net)</th>
+                                <th className="p-5 bg-[#0B1221] text-emerald-400">보조금 수익 (Grant)</th>
+                                <th className="p-5 bg-[#0B1221]">총 합계 (Total Rev)</th>
+                                <th className="p-5 bg-[#0B1221]">매출원가</th>
+                                <th className="p-5 bg-[#0B1221]">매출총이익</th>
+                                <th className="p-5 bg-[#0B1221] text-indigo-400">인건비</th>
+                                <th className="p-5 bg-[#0B1221]">마케팅비</th>
+                                <th className="p-5 bg-[#0B1221]">임차료</th>
+                                <th className="p-5 bg-[#0B1221]">감가상각</th>
+                                <th className="p-5 bg-[#0B1221]">기타비용</th>
+                                <th className="p-5 bg-[#0B1221]">영업이익</th>
+                                <th className="p-5 bg-[#0B1221]">당기순이익</th>
+                                <th className="p-5 bg-[#0B1221] text-rose-400">투자/자본금</th>
+                                <th className="p-5 bg-[#0B1221] text-amber-400">보조금 집행(바우처)</th>
+                                <th className="p-5 bg-[#3b82f6]/20 text-blue-400 font-black">Net Cash Flow</th>
+                                <th className="p-5 bg-[#0B1221]/80 backdrop-blur-sm z-10 sticky right-0">이월현금 (Balance)</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/5">
-                            <tr className="hover:bg-white/5">
-                                <td className="p-4 font-bold text-emerald-400 flex items-center gap-2">매출액 <Settings2 size={12} /></td>
-                                {Array.from({ length: 12 }).map((_, i) => (
-                                    <td key={i} className="p-4 text-right font-mono">15,000</td>
-                                ))}
-                                <td className="p-4 text-right font-bold text-indigo-400">180,000</td>
-                            </tr>
-                            <tr className="hover:bg-white/5 text-slate-300">
-                                <td className="p-4 flex items-center gap-2 pl-8">- 매출원가</td>
-                                {Array.from({ length: 12 }).map((_, i) => (
-                                    <td key={i} className="p-4 text-right font-mono">6,000</td>
-                                ))}
-                                <td className="p-4 text-right font-bold text-slate-400">72,000</td>
-                            </tr>
-                            <tr className="bg-slate-800/50 hover:bg-white/5 font-bold">
-                                <td className="p-4 text-white">매출총이익</td>
-                                {Array.from({ length: 12 }).map((_, i) => (
-                                    <td key={i} className="p-4 text-right font-mono text-white">9,000</td>
-                                ))}
-                                <td className="p-4 text-right font-bold text-indigo-400">108,000</td>
+                        <tbody className="divide-y divide-white/5 text-[11px] font-bold">
+                            {filteredTableData.map((row) => (
+                                <tr key={row.month} className="hover:bg-white/5 transition-colors group">
+                                    <td className="p-5 sticky left-0 bg-[#151D2E] group-hover:bg-[#1e293b] z-10 transition-colors uppercase italic font-black">{row.month}</td>
+                                    <td className="p-5">{formatCurrency(row.operatingRevenue)}</td>
+                                    <td className="p-5 text-emerald-400">{formatCurrency(row.grantIncome)}</td>
+                                    <td className="p-5 font-black text-slate-300">{formatCurrency(row.revenue)}</td>
+                                    <td className="p-5 text-slate-500">{formatCurrency(row.cogs)}</td>
+                                    <td className="p-5">{formatCurrency(row.grossProfit)}</td>
+                                    <td className="p-5 text-indigo-400">{formatCurrency(row.payroll)}</td>
+                                    <td className="p-5">{formatCurrency(row.marketing)}</td>
+                                    <td className="p-5">{formatCurrency(row.rent)}</td>
+                                    <td className="p-5 text-slate-500">{formatCurrency(row.depreciation)}</td>
+                                    <td className="p-5">{formatCurrency(row.misc)}</td>
+                                    <td className={`p-5 font-black ${row.operatingProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatCurrency(row.operatingProfit)}</td>
+                                    <td className={`p-5 font-black ${row.netIncome >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatCurrency(row.netIncome)}</td>
+                                    <td className="p-5 text-rose-400">{row.investment > 0 ? `+${formatCurrency(row.investment)}` : '-'}</td>
+                                    <td className="p-5 text-amber-500/50">{formatCurrency(row.voucherExecution)}</td>
+                                    <td className={`p-5 font-black italic bg-blue-500/5 ${row.monthlyNetCashFlow >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{formatCurrency(row.monthlyNetCashFlow)}</td>
+                                    <td className="p-5 bg-white/5 font-black text-indigo-300 sticky right-0 z-10 backdrop-blur-sm">{formatCurrency(row.carryoverCash)}</td>
+                                </tr>
+                            ))}
+                            {/* TOTAL ROW - Must strictly align with <thead> */}
+                            <tr className="bg-[#0B1221] border-t-2 border-indigo-500/20 text-[11px] font-black uppercase italic">
+                                <td className="p-5 sticky left-0 bg-[#0B1221] z-10">TOTAL (YTD)</td>
+                                <td className="p-5 text-white">{formatCurrency(totalRow.operatingRevenue)}</td>
+                                <td className="p-5 text-emerald-400">{formatCurrency(totalRow.grantIncome)}</td>
+                                <td className="p-5 text-slate-400">{formatCurrency(totalRow.revenue)}</td>
+                                <td className="p-5 text-slate-500">{formatCurrency(totalRow.cogs)}</td>
+                                <td className="p-5 text-white">{formatCurrency(totalRow.grossProfit)}</td>
+                                <td className="p-5 text-indigo-400">{formatCurrency(totalRow.payroll)}</td>
+                                <td className="p-5 text-white">{formatCurrency(totalRow.marketing)}</td>
+                                <td className="p-5 text-white">{formatCurrency(totalRow.rent)}</td>
+                                <td className="p-5 text-slate-500">{formatCurrency(totalRow.depreciation)}</td>
+                                <td className="p-5 text-white">{formatCurrency(totalRow.misc)}</td>
+                                <td className={`p-5 ${totalRow.operatingProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatCurrency(totalRow.operatingProfit)}</td>
+                                <td className={`p-5 ${totalRow.netIncome >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatCurrency(totalRow.netIncome)}</td>
+                                <td className="p-5 text-rose-400">{totalRow.investment > 0 ? `+${formatCurrency(totalRow.investment)}` : '-'}</td>
+                                <td className="p-5 text-amber-500/50">{formatCurrency(totalRow.voucherExecution)}</td>
+                                <td className={`p-5 italic bg-blue-500/10 ${totalRow.monthlyNetCashFlow >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{formatCurrency(totalRow.monthlyNetCashFlow)}</td>
+                                <td className="p-5 bg-white/20 text-indigo-300 sticky right-0 z-10 backdrop-blur-sm">{formatCurrency(totalRow.carryoverCash)}</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
             </div>
-
-            <div className="grid grid-cols-3 gap-6 mt-6">
-                <div className="bg-[#1A1F2B] border border-white/5 rounded-2xl p-6">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><BarChart3 size={14} /> Break-Even Point (BEP)</h4>
-                    <div className="text-3xl font-black text-white">₩65.2M / 월</div>
-                    <div className="mt-2 text-xs text-emerald-400 bg-emerald-500/10 inline-block px-2 py-1 rounded">현재 매출 내에서 커버 가능</div>
-                </div>
-                <div className="bg-[#1A1F2B] border border-white/5 rounded-2xl p-6">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><TrendingUp size={14} /> Revenue Leverage</h4>
-                    <div className="text-3xl font-black text-white">3.2x</div>
-                    <div className="mt-2 text-xs text-indigo-400 bg-indigo-500/10 inline-block px-2 py-1 rounded">고정비 분산 효과 우수</div>
-                </div>
-                <div className="bg-[#1A1F2B] border border-white/5 rounded-2xl p-6">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 flex items-center gap-2"><AlertTriangle size={14} /> Opex Sensitivity</h4>
-                    <div className="text-3xl font-black text-white">+12%</div>
-                    <div className="mt-2 text-xs text-rose-400 bg-rose-500/10 inline-block px-2 py-1 rounded">인건비 상승에 가장 취약함</div>
-                </div>
-            </div>
         </div>
     );
 };
+
+const KPICard: React.FC<{ label: string, val: string, sub: string, icon: any, trend?: string, color?: string }> = ({ label, val, sub, icon, trend, color = "text-white" }) => (
+    <div className="bg-[#151D2E] p-6 rounded-3xl border border-white/5 shadow-xl group hover:border-indigo-500/30 transition-all cursor-default">
+        <div className="flex items-center justify-between mb-4">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</p>
+            <div className="p-2 bg-white/5 rounded-xl text-slate-600 group-hover:text-indigo-400 transition-colors">
+                {icon}
+            </div>
+        </div>
+        <div className="space-y-1">
+            <h4 className={`text-2xl font-black italic tracking-tighter ${color}`}>{val}</h4>
+            <div className="flex items-center justify-between">
+                <p className="text-[9px] font-bold text-slate-600 uppercase italic">{sub}</p>
+                {trend && (
+                    <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                        <ArrowUpRight size={8} className="text-emerald-400" />
+                        <span className="text-[8px] font-black text-emerald-400 uppercase tracking-tighter">{trend}</span>
+                    </div>
+                )}
+            </div>
+        </div>
+    </div>
+);
 
 export default MonthlyPnL;

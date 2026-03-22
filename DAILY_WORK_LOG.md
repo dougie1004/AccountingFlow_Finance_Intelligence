@@ -520,3 +520,44 @@ ChatGPT 피드백을 수용하여 단일 Runway 예측값을 **확률 분포(p10
 **Modified Files:** `forecastingEngine.ts`, `riskEngine.ts`, `types/index.ts`, `ManagementRiskReport.tsx`, `ACCOUNTING_CONSTITUTION.md`
 
 **Status:** ✅ ENGINE COMPLETE — UI 시각화 다음 단계 예정
+
+---
+
+## 2026-03-19
+
+### 🚀 Simulation Engine Integrity & Settlement Logic Optimization
+
+**Objective:**
+Resolve critical simulation timeline bugs, clean up legacy test data, and finalize the Accounts Receivable/Payable (AR/AP) reconciliation workflow.
+
+**Work Items:**
+
+1.  **Simulation Timeline Anchor Fix (`scenario_manager.rs`)**
+    *   **Issue:** Simulation was incorrectly generating entries starting from 2025, even when actual data existed for 2026+.
+    *   **Fix:** Modified the Rust backend to dynamically detect the **`last_actual_date`** from the ledger and use it as the hard anchor for all simulation scenarios.
+    *   **Safety Guard:** Implemented a verification layer to prevent any simulated entry from being generated prior to the last actual transaction date.
+
+2.  **Legacy Mock Data Purge (`journalGenerator.ts`)**
+    *   Removed hardcoded 2025 "Mock Actuals" that were causing confusion in financial reports.
+    *   Modified `generateSystemWideMockData` to return an empty ledger by default, ensuring a "Clean Slate" policy for new simulations.
+
+3.  **Tauri Environment Stabilization (Windows)**
+    *   Updated `package.json` scripts from `"tauri": "tauri"` to `"tauri": "npx tauri"`.
+    *   **Result:** Resolved "'tauri' is not recognized" errors on Windows systems without global CLI installation.
+
+4.  **AR/AP Reconciliation Logic Fix (`Settlement.tsx`)**
+    *   **Duplicate Visibility Fix:** Implemented a `settledIds` tracking system using `useMemo` to identify parent entries with matching `SETTLE-` records.
+    *   **Dynamic Filtering:** Updated the "Pending" list to automatically exclude entries that have been fully offset by a settlement entry.
+    *   **Batch Processing ("전체 수금 승인"):** Implemented the `handleSettleAll` button logic to allow one-click processing of all visible pending receivables/payables.
+
+**Results:**
+*   **Data Accuracy:** Simulations now align perfectly with the end of the actual ledger, eliminating "time-traveling" entries.
+*   **UI UX:** The Reconciliation page now correctly reflects a "Zero-Inbox" state after processing collections/payments.
+*   **Developer Experience:** `npm run tauri dev` now works out-of-the-box on Windows environments.
+
+**Next Steps:**
+*   Monitor simulation performance for 5+ year ultra-long-term scenarios.
+*   Extend the `settledIds` logic to support partial payments (partial offsets).
+*   Refine the "Dunning Email" automation mock for the next presentation.
+
+---

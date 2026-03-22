@@ -10,7 +10,7 @@ import CalendarView from '../components/journal/CalendarView';
 import { ManualEntryModal } from '../components/journal/ManualEntryModal';
 
 const Journal: React.FC = () => {
-    const { ledger, addEntry, partners, stagingTransactions, setStagingTransactions } = useAccounting();
+    const { ledger, addEntry, partners, stagingTransactions, setStagingTransactions, selectedDate } = useAccounting();
 
     // Filtering state
     const [startDate, setStartDate] = useState('');
@@ -24,9 +24,10 @@ const Journal: React.FC = () => {
 
     // Extract unique vendors for dropdown
     const vendors = useMemo(() => {
-        const uniqueVendors = new Set(ledger.map(e => e.vendor).filter(Boolean));
+        // [STRICT] Only consider vendors in the current period
+        const uniqueVendors = new Set(ledger.filter(e => e.date <= selectedDate).map(e => e.vendor).filter(Boolean));
         return Array.from(uniqueVendors).sort();
-    }, [ledger]);
+    }, [ledger, selectedDate]);
 
     // Derived filtered data
     const filteredLedger = useMemo(() => {

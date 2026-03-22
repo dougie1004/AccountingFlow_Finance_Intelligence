@@ -26,8 +26,15 @@ pub fn parse_excel_file(bytes: Vec<u8>) -> Result<Vec<ParsedTransaction>, String
             else if val.contains("거래처") || val.contains("vendor") || val.contains("상호") || val.contains("가맹점") { col_map.insert("vendor", i); }
             else if val.contains("적요") || val.contains("내용") || val.contains("품명") || val.contains("description") { col_map.insert("desc", i); }
             else if val.contains("금액") || val.contains("amount") || val.contains("합계") || val.contains("price") { col_map.insert("amount", i); }
+            else if val.contains("차변") || val.contains("debitaccount") { col_map.insert("debit_account", i); }
+            else if val.contains("대변") || val.contains("creditaccount") { col_map.insert("credit_account", i); }
+            else if val.contains("부가세") || val.contains("vat") { col_map.insert("vat", i); }
+            else if val.contains("구분") || val.contains("type") { col_map.insert("entry_type", i); }
         }
     }
+
+    let is_journal_mode = col_map.contains_key("debit_account") && col_map.contains_key("credit_account");
+    println!("[Excel Parser] Journal Mode Detected: {}", is_journal_mode);
 
     // Fallback if no header matched: Assume standard 0,1,2,3
     if col_map.is_empty() {
@@ -52,32 +59,44 @@ pub fn parse_excel_file(bytes: Vec<u8>) -> Result<Vec<ParsedTransaction>, String
             _ => 0.0,
         };
 
+        let vat_cell = col_map.get("vat").and_then(|&i| row.get(i));
+        let vat = match vat_cell {
+            Some(Data::Float(f)) => *f,
+            Some(Data::Int(i)) => *i as f64,
+            Some(Data::String(s)) => s.replace(",", "").replace("₩", "").replace("원", "").trim().parse::<f64>().unwrap_or(amount / 11.0),
+            _ => if is_journal_mode { 0.0 } else { (amount / 11.0).round() },
+        };
+
+        let entry_type = col_map.get("entry_type").and_then(|&i| row.get(i)).map(|c| c.to_string()).unwrap_or_else(|| "Expense".into());
+        let debit_account = col_map.get("debit_account").and_then(|&i| row.get(i)).map(|c| c.to_string());
+        let credit_account = col_map.get("credit_account").and_then(|&i| row.get(i)).map(|c| c.to_string());
+
         if date.is_empty() && amount == 0.0 { continue; }
 
         let mut tx = ParsedTransaction {
             date: Some(date.clone()),
             amount,
-            vat: (amount / 11.0).round(),
-            entry_type: Some("Expense".to_string()),
+            vat,
+            entry_type: Some(entry_type),
             description: Some(description),
             vendor: Some(vendor),
-            vendor_reg_no: None,
-            vendor_representative: None,
-            vendor_address: None,
-            reasoning: "Smart Excel Engine으로 추출됨".to_string(),
+            is_journal_mode,
+            debit_account,
+            credit_account,
+            reasoning: if is_journal_mode { "직접 분개 모드: AI 분석을 생략하고 데이터를 직접 로드합니다.".to_string() } else { "Smart Excel Engine으로 추출됨".to_string() },
             account_name: None,
             needs_clarification: amount == 0.0,
             clarification_prompt: if amount == 0.0 { Some("금액 데이터를 찾을 수 없습니다.".to_string()) } else { None },
-            clarification_options: None,
-            is_consultation: false,
-            confidence: Some(if amount > 0.0 && !date.is_empty() { "High".to_string() } else { "Normal".to_string() }),
-            payment_method: None,
-            audit_trail: vec!["#1 Excel 지능형 파싱 완료".to_string()],
+            confidence: Some(if is_journal_mode { "High".to_string() } else if amount > 0.0 && !date.is_empty() { "High".to_string() } else { "Normal".to_string() }),
+            audit_trail: vec![format!("#1 Excel 지능형 파싱 완료 (Mode: {})", if is_journal_mode { "Journal" } else { "Transaction" })],
             id: Some(crate::utils::id_generator::generate_id(&date, crate::utils::id_generator::IdPrefix::AI)),
             ..Default::default()
         };
 
-        crate::ai::rule_based_classifier::classify_by_rules(&mut tx);
+        if !is_journal_mode {
+            tx.suggestion = crate::ai::rule_based_classifier::classify_by_rules(&tx);
+        }
+        
         results.push(tx);
     }
 

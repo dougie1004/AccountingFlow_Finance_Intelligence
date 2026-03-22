@@ -1,6 +1,6 @@
 import React, { useContext, useRef } from 'react';
 import { JournalEntry } from '../../types';
-import { Paperclip, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
+import { Paperclip, CheckCircle, AlertCircle, Trash2, History, Info } from 'lucide-react';
 import { AccountingContext } from '../../context/AccountingContext';
 
 interface JournalTableProps {
@@ -68,8 +68,27 @@ const JournalTable: React.FC<JournalTableProps> = ({ entries }) => {
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-white font-black">
                                     {entry.vendor || '내부 정산'}
                                 </td>
-                                <td className="px-6 py-4 text-sm text-slate-300 max-w-xs truncate italic">
-                                    "{entry.description || '내용 없음'}"
+                                <td className="px-6 py-4 text-sm text-slate-300 max-w-xs relative group/desc">
+                                    <div className="flex items-center gap-2">
+                                        <span className="truncate italic">"{entry.description || '내용 없음'}"</span>
+                                        {entry.auditTrail && entry.auditTrail.length > 0 && (
+                                            <div className="relative">
+                                                <History size={12} className="text-slate-600 group-hover/desc:text-indigo-400 transition-colors cursor-help" />
+                                                <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-[#0B1221] border border-white/10 rounded-xl shadow-2xl opacity-0 invisible group-hover/desc:opacity-100 group-hover/desc:visible transition-all z-50 pointer-events-none">
+                                                    <div className="flex items-center gap-2 mb-2 text-[9px] font-black text-indigo-400 uppercase tracking-widest">
+                                                        <History size={10} /> Audit Trail
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        {entry.auditTrail.map((t, i) => (
+                                                            <div key={i} className="text-[10px] text-slate-400 leading-tight border-l border-white/10 pl-2">
+                                                                {t}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                     <div className="flex items-center justify-center gap-2">

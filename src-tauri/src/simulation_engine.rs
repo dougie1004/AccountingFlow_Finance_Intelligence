@@ -51,6 +51,7 @@ pub fn run_simulation() -> SimulationResult {
         attachment_url: None,
         ocr_data: None,
         compliance_context: None,
+        ..Default::default()
     });
     version_counter += 1;
 
@@ -69,6 +70,7 @@ pub fn run_simulation() -> SimulationResult {
         expense_account: Some("Depreciation Expense".to_string()),
         base_useful_life: None,
         is_sme_special_life: false,
+        ..Default::default()
     };
     assets.push(machine);
     
@@ -90,6 +92,7 @@ pub fn run_simulation() -> SimulationResult {
         attachment_url: Some("https://example.com/inv_nvidia.pdf".to_string()),
         ocr_data: None,
         compliance_context: None,
+        ..Default::default()
     });
     version_counter += 1;
 
@@ -110,6 +113,7 @@ pub fn run_simulation() -> SimulationResult {
             items: vec![OrderItem { sku: "SaaS-Sub".to_string(), quantity: 1, unit_price: sales_amount, amount: sales_amount }],
             total_amount: sales_amount,
             vat: sales_amount * 0.1,
+            ..Default::default()
         };
         orders.push(sales_order.clone());
         
@@ -128,6 +132,7 @@ pub fn run_simulation() -> SimulationResult {
             items: vec![OrderItem { sku: "Hosting".to_string(), quantity: 1, unit_price: cost_amount, amount: cost_amount }],
             total_amount: cost_amount,
             vat: cost_amount * 0.1,
+            ..Default::default()
         };
         orders.push(purchase_order.clone());
 
@@ -161,6 +166,7 @@ pub fn run_simulation() -> SimulationResult {
         attachment_url: Some("https://example.com/receipt_hyatt.pdf".to_string()),
         ocr_data: None,
         compliance_context: None,
+        ..Default::default()
     });
     version_counter += 1;
 
@@ -183,6 +189,7 @@ pub fn run_simulation() -> SimulationResult {
             attachment_url: None, // Missing proof!
             ocr_data: None,
             compliance_context: None,
+            ..Default::default()
         });
         version_counter += 1;
     }
@@ -205,6 +212,7 @@ pub fn run_simulation() -> SimulationResult {
         attachment_url: Some("https://example.com/car_repair.pdf".to_string()),
         ocr_data: Some("{\"insurance_coverage\": false}".to_string()),
         compliance_context: None,
+        ..Default::default()
     });
     version_counter += 1;
 
@@ -226,6 +234,7 @@ pub fn run_simulation() -> SimulationResult {
         attachment_url: None,
         ocr_data: None,
         compliance_context: None,
+        ..Default::default()
     });
     version_counter += 1;
 
@@ -238,6 +247,7 @@ pub fn run_simulation() -> SimulationResult {
         record_count: ledger.len(),
         total_amount: ledger.iter().map(|e| e.amount).sum(),
         integrity_hash: "simulated_integrity_hash".to_string(),
+        ..Default::default()
     };
     
     let validation_results = tax_validator::run_validation(&snapshot, Some(&company_metadata));

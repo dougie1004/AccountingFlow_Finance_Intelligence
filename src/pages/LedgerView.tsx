@@ -3,11 +3,22 @@ import { useAccounting } from '../hooks/useAccounting';
 import { FileText, Search, Calendar, ChevronDown, ArrowUpDown, ChevronUp } from 'lucide-react';
 
 const LedgerView: React.FC = () => {
-    const { ledger, subLedger, partners } = useAccounting();
+    const { accountingLedger, allLinesLedger, partners, selectedDate } = useAccounting();
 
     // Filtering state
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+
+    React.useEffect(() => {
+        if (!startDate && !endDate && selectedDate) {
+            const d = new Date(selectedDate);
+            const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+            const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+            const end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+            setStartDate(start);
+            setEndDate(end);
+        }
+    }, [selectedDate, startDate, endDate]);
     const [selectedAccount, setSelectedAccount] = useState('전체 계정');
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'all' | 'subledger'>('subledger');
@@ -16,134 +27,34 @@ const LedgerView: React.FC = () => {
         direction: 'desc'
     });
 
-    const activeData = viewMode === 'subledger' ? subLedger : ledger;
+    // [STRICT] Selection determines source (Approved vs All)
+    const activeData = useMemo(() => {
+        return viewMode === 'subledger' ? accountingLedger : allLinesLedger;
+    }, [viewMode, accountingLedger, allLinesLedger]);
 
-    // Extract all unique accounts from both sides
     const accounts = useMemo(() => {
         const accs = new Set<string>();
         activeData.forEach(e => {
-            accs.add(e.debitAccount);
-            accs.add(e.creditAccount);
+            accs.add(e.account);
         });
         return Array.from(accs).sort();
     }, [activeData]);
-
-    // Comprehensive filtering & sorting logic with Virtual VAT Expansion
     const processedData = useMemo(() => {
-        const expandedRows: {
-            id: string;
-            date: string;
-            vendor: string;
-            description: string;
-            account: string;
-            amount: number;
-            isDebit: boolean;
-            ocrData?: string;
-        }[] = [];
-
-        activeData.forEach(entry => {
-            const baseAmount = entry.amount;
-            const vatAmount = entry.vat || 0;
-            const totalAmount = baseAmount + vatAmount;
-
-            if (entry.type === 'Revenue') {
-                // DR AR (Total)
-                expandedRows.push({
-                    id: `${entry.id}-DR`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.debitAccount,
-                    amount: totalAmount,
-                    isDebit: true,
-                    ocrData: entry.ocrData
-                });
-                // CR Sales (Base)
-                expandedRows.push({
-                    id: `${entry.id}-CR-BASE`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.creditAccount,
-                    amount: baseAmount,
-                    isDebit: false,
-                    ocrData: entry.ocrData
-                });
-                // CR VAT (VAT)
-                if (vatAmount > 0) {
-                    expandedRows.push({
-                        id: `${entry.id}-CR-VAT`,
-                        date: entry.date,
-                        vendor: entry.vendor || '-',
-                        description: `[VAT] ${entry.description}`,
-                        account: '부가가치세예수금',
-                        amount: vatAmount,
-                        isDebit: false,
-                        ocrData: entry.ocrData
-                    });
-                }
-            } else if (entry.type === 'Expense' || entry.type === 'Asset') {
-                // DR Asset/Expense (Base)
-                expandedRows.push({
-                    id: `${entry.id}-DR-BASE`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.debitAccount,
-                    amount: baseAmount,
-                    isDebit: true,
-                    ocrData: entry.ocrData
-                });
-                // DR VAT (VAT)
-                if (vatAmount > 0) {
-                    expandedRows.push({
-                        id: `${entry.id}-DR-VAT`,
-                        date: entry.date,
-                        vendor: entry.vendor || '-',
-                        description: `[VAT] ${entry.description}`,
-                        account: '부가가치세대급금',
-                        amount: vatAmount,
-                        isDebit: true,
-                        ocrData: entry.ocrData
-                    });
-                }
-                // CR Cash/AP (Total)
-                expandedRows.push({
-                    id: `${entry.id}-CR`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.creditAccount,
-                    amount: totalAmount,
-                    isDebit: false,
-                    ocrData: entry.ocrData
-                });
-            } else {
-                // Standard Double Entry
-                expandedRows.push({
-                    id: `${entry.id}-DR`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.debitAccount,
-                    amount: totalAmount,
-                    isDebit: true,
-                    ocrData: entry.ocrData
-                });
-                expandedRows.push({
-                    id: `${entry.id}-CR`,
-                    date: entry.date,
-                    vendor: entry.vendor || '-',
-                    description: entry.description,
-                    account: entry.creditAccount,
-                    amount: totalAmount,
-                    isDebit: false,
-                    ocrData: entry.ocrData
-                });
-            }
+        const rows = activeData.map((line, idx) => {
+            // Find parent entry to get vendor if possible, or use account if missing
+            return {
+                id: `${line.id}-${idx}`,
+                date: line.date,
+                vendor: (line as any).vendor || '-', 
+                description: line.description,
+                account: line.account,
+                amount: line.debit || line.credit,
+                isDebit: line.debit > 0,
+                ocrData: (line as any).ocrData
+            };
         });
 
-        const filtered = expandedRows.filter(row => {
+        const filtered = rows.filter(row => {
             // Account filter
             const matchesAccount = selectedAccount === '전체 계정' || row.account === selectedAccount;
 

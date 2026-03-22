@@ -1,7 +1,7 @@
 use crate::core::models::{
     Asset, AuditSnapshot, JournalEntry, Order, ParsedTransaction, SimulationResult, 
     TaxAdjustment, TenantConfig, AnalysisResponse, Partner, ValidationResult,
-    ScenarioDefinition, LedgerScope, AuditIssue, AuditEntity, Scenario
+    ScenarioDefinition, LedgerScope, AuditIssue, AuditEntity, Scenario, FinancialSummary
 };
 use crate::core::bank_models::BankMapping;
 use std::collections::HashMap;
@@ -185,6 +185,15 @@ pub async fn process_universal_file(
     file_name: String,
 ) -> Result<Vec<ParsedTransaction>, String> {
     crate::ai::universal_ingestor::ingest_universal_file(file_bytes, file_name).await
+}
+
+#[tauri::command]
+pub fn generate_close_readiness_report(
+    period: String,
+    ledger: Vec<JournalEntry>,
+    assets: Vec<Asset>
+) -> crate::core::models::CloseReadinessReport {
+    crate::engine::closing::close_readiness::generate_report(&period, &ledger, &assets)
 }
 
 #[tauri::command]
@@ -532,7 +541,8 @@ pub fn get_ir_financial_summary(ledger: Vec<JournalEntry>) -> ir_engine::IRFinan
 #[tauri::command]
 pub fn run_strategic_scenario(
     definition: ScenarioDefinition,
-    ledger: Vec<JournalEntry>
+    ledger: Vec<JournalEntry>,
+    selected_date: String,
 ) -> Vec<JournalEntry> {
     // 1. Isolation Check: Only use Actual ledger as snapshot source
     let actual_only: Vec<JournalEntry> = ledger.into_iter()
@@ -540,7 +550,7 @@ pub fn run_strategic_scenario(
         .collect();
     
     // 2. Project Scenario without mutating actuals
-    ScenarioManager::project_scenario(definition, actual_only)
+    ScenarioManager::project_scenario(definition, actual_only, selected_date)
 }
 
 #[tauri::command]
@@ -641,7 +651,7 @@ pub async fn ai_suggest_risk_score(unit_name: String) -> Result<serde_json::Valu
 }
 
 #[tauri::command]
-pub async fn generate_audit_priorities(entities: Vec<AuditEntity>) -> Result<String, String> {
+pub async fn generate_audit_priorities(_entities: Vec<AuditEntity>) -> Result<String, String> {
     Ok("1. 자고 관리 프로세스 정밀 실사 (High Likelihood)\n2. 구매 시스템 SoD 재설계 및 권한 감사 (High Impact)".to_string())
 }
 
@@ -674,16 +684,112 @@ pub async fn get_all_scenarios() -> Result<Vec<Scenario>, String> {
 }
 
 #[tauri::command]
-pub async fn ask_ai_assistant(message: String, tenant_id: String) -> Result<String, String> {
-    println!("[AI Assistant] Tenant: {} | Message: {}", tenant_id, message);
+pub async fn ask_ai_assistant(
+    message: String, 
+    tenant_id: Option<String>, 
+    ledger: Option<Vec<JournalEntry>>,
+    financials: Option<FinancialSummary>,
+    company_knowledge: Option<String>,
+    current_date: Option<String>,
+) -> Result<String, String> {
+    let tenant = tenant_id.unwrap_or_else(|| "default".to_string());
+    println!("[AI Assistant] Processing request for tenant: {}", tenant);
     
-    // Simple logic: if specific keywords appear, return targeted simulated answers.
-    // In production, this would call Gemini 2.0.
-    if message.contains("리스크") || message.contains("위험") {
-        Ok("현재 가장 높은 리스크는 '매입 집중도'입니다. 상위 3개 거래처에 지출의 85%가 집중되어 있어 대안 공급망 확보가 시급합니다.".to_string())
-    } else if message.contains("현금") || message.contains("런웨이") {
-        Ok("현재 현금 런웨이는 약 14.5개월입니다. 3분기 예정된 설비 투자를 진행할 경우 9개월로 단축될 것으로 예상됩니다.".to_string())
-    } else {
-        Ok(format!("'{}'에 대해 분석한 결과, 현재까지의 장부 데이터상 특이점은 발견되지 않았습니다. 추가 필터링이 필요하신가요?", message))
+    // Construct Enhanced Context
+    let mut reasoning = String::new();
+    let policy = company_knowledge.unwrap_or_else(|| "표준 회계 정책: 모든 지출은 적격증빙을 지향하며, 접대비는 한도를 준수함.".to_string());
+    
+    if let Some(l) = ledger {
+        let total_count = l.len();
+        let approved_count = l.iter().filter(|e| e.status == "Approved").count();
+        let total_amount: f64 = l.iter().map(|e| e.amount).sum();
+        
+        reasoning.push_str(&format!("### [전체 장부 요약]\n- 총 전표 수: {}건\n- 승인된 전표: {}건\n- 누적 거래액: {}원\n", total_count, approved_count, total_amount));
+
+        // Year-by-year summary to prevent "no data" errors
+        let mut years_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for entry in &l {
+            if entry.date.len() >= 4 {
+                years_set.insert(entry.date[0..4].to_string());
+            }
+        }
+        let years: Vec<String> = years_set.into_iter().collect();
+        reasoning.push_str(&format!("- 데이터 보유 연도: {}\n", years.join(", ")));
+
+        // Monthly Summary
+        let mut monthly_summary: std::collections::BTreeMap<String, (f64, f64)> = std::collections::BTreeMap::new();
+        for entry in &l {
+            if entry.date.len() >= 7 {
+                let month = &entry.date[0..7];
+                let (rev, exp) = monthly_summary.entry(month.to_string()).or_insert((0.0, 0.0));
+                let nature = get_account_nature_marker(&entry.debit_account, &entry.credit_account);
+                
+                // Simplified classification for reasoning
+                if entry.credit_account.contains("매출") || entry.credit_account.contains("Revenue") || entry.credit_account.contains("401") {
+                    *rev += entry.amount;
+                } else if entry.debit_account.contains("비용") || entry.debit_account.contains("Expense") || entry.debit_account.starts_with("8") || entry.debit_account.starts_with("5") {
+                    *exp += entry.amount;
+                }
+            }
+        }
+        
+        reasoning.push_str("\n### [월별 매출/비용 추이 (최근 6개월)]\n");
+        let months: Vec<String> = monthly_summary.keys().cloned().collect();
+        for m in months.iter().rev().take(6) {
+            let (r, e) = monthly_summary.get(m).unwrap();
+            reasoning.push_str(&format!("- {}: 매출 {}원 / 비용 {}원 (순이익: {}원)\n", m, r, e, r - e));
+        }
+
+        // Recent 50 entries
+        reasoning.push_str("\n### [최근 상세 거래 내역 (Last 50)]\n");
+        let recent_history: Vec<String> = l.iter().rev().take(50)
+            .map(|e| format!("- [{}] {}: {}원 (계정: {})", e.date, e.description, e.amount, e.debit_account))
+            .collect();
+        reasoning.push_str(&recent_history.join("\n"));
+        reasoning.push_str("\n");
     }
+
+    if let Some(f) = financials {
+        reasoning.push_str(&format!(
+            "\n### [현재 재무 지표 (YTD 요약)]\n- 유동현금: {}원\n- 매출액(YTD): {}원\n- 영업비용(YTD): {}원\n- 당기순이익: {}원\n- 총 자산: {}원\n- 총 자본: {}원\n",
+            f.cash, f.revenue, f.expenses, f.net_income, f.total_assets, f.total_equity
+        ));
+    }
+
+    if let Some(date) = current_date {
+        reasoning.push_str(&format!("\n- 시스템 현재 기준일: {}\n", date));
+    }
+
+    // Single efficient consultation call
+    let final_prompt = format!("## [Financial Context]\n{}\n\n질문: {}", reasoning, message);
+    let result = ai_service::consult_compliance_ai(&final_prompt, None, &policy).await;
+    
+    match result {
+        Ok(res) => {
+            if let Some(rev) = res.compliance_review {
+                Ok(rev.message)
+            } else {
+                Ok("AI 분석 결과를 생성할 수 없습니다.".to_string())
+            }
+        },
+        Err(e) => {
+            println!("[AI Assistant] Error: {}", e);
+            Err(format!("AI 서비스 연결 실패: {}", e))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn train_knowledge_from_file(
+    bytes: Vec<u8>,
+    mime: &str
+) -> Result<String, String> {
+    ai_service::train_knowledge_from_media(bytes, mime).await
+}
+
+// Helper for quick classification in reasoning
+fn get_account_nature_marker(debit: &str, credit: &str) -> String {
+    if credit.contains("매출") || credit.contains("Revenue") { "REVENUE".to_string() }
+    else if debit.contains("비용") || debit.contains("Expense") { "EXPENSE".to_string() }
+    else { "OTHER".to_string() }
 }

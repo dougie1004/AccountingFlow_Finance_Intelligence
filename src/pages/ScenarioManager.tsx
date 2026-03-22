@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
     History, Building2, Calendar, BrainCircuit, User,
-    Search, Plus, ShieldCheck, Zap, AlertCircle, Database, Download
+    Search, Plus, ShieldCheck, Zap, AlertCircle, Database, Download, Lock
 } from "lucide-react";
 
 // Note: Using window.__TAURI__.core.invoke as a fallback if safeInvoke is not available in main
@@ -101,6 +101,7 @@ const ScenarioCard = ({ s }: { s: Scenario }) => (
 );
 
 export default function ScenarioManager() {
+    const { isDev } = (window as any).useAccounting ? (window as any).useAccounting() : { isDev: false }; // Safe access
     const [scenarios, setScenarios] = useState<Scenario[]>([]);
     const [viewMode, setViewMode] = useState<"all" | "category" | "project" | "new" | "risk">("risk");
     const [searchTerm, setSearchTerm] = useState("");
@@ -255,16 +256,24 @@ export default function ScenarioManager() {
                             </div>
                             <span className="text-xs font-black text-blue-500 uppercase tracking-widest">DD Knowledge Base</span>
                         </div>
-                        <h1 className="text-4xl font-black text-white tracking-tighter">통합 진단 시나리오 관리</h1>
+                        <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-4">
+                            통합 진단 시나리오 관리
+                            <div className={`flex items-center gap-2 px-3 py-1 ${isDev ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-amber-500/10 border-amber-500/20'} border rounded-full`}>
+                                {isDev ? <Zap size={14} className="text-indigo-400" /> : <Lock size={14} className="text-amber-500" />}
+                                <span className={`text-[10px] font-black ${isDev ? 'text-indigo-400' : 'text-amber-400'} uppercase tracking-widest italic`}>
+                                    {isDev ? 'Developer Access Active' : 'Safety Mode Active'}
+                                </span>
+                            </div>
+                        </h1>
                         <p className="text-slate-500 text-lg font-medium leading-relaxed max-w-2xl">
                             AI가 탐지한 새로운 리스크와 실사 전문가의 노하우가 결합된 지능형 준법 실사 지식 베이스입니다.
                         </p>
                     </div>
                     <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-blue-500 transition-all active:scale-95 shadow-2xl shadow-blue-900/50"
+                        disabled
+                        className="bg-slate-800 text-slate-500 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-2 cursor-not-allowed border border-white/5 shadow-inner"
                     >
-                        <Plus size={16} /> 새 시나리오 등록
+                        <Lock size={16} /> 시나리오 등록 잠금 (Safety Mode)
                     </button>
                 </div>
 

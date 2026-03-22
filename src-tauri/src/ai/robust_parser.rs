@@ -214,8 +214,8 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
             // This is tricky. For now, we apply them to the NEXT row and then keep a cumulative list for the global doc.
         }
 
-        // 6. Connect to Brain (Classify)
-        rule_based_classifier::classify_by_rules(&mut tx); 
+        // 6. Connect to Brain (Classify - Suggestion Only)
+        tx.suggestion = rule_based_classifier::classify_by_rules(&tx); 
         
         // 7. Validation Flag Logic Overrides
         if tx.amount == 0.0 && tx.parse_status != Some(ParseStatus::NeedConfirm) {
