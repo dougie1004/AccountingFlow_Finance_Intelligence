@@ -27,41 +27,55 @@ const summarizeLedger = (ledger: any[]) => {
     let totalRevenue = 0;
     let totalExpense = 0;
     let largestExpense = { amount: 0, description: "" };
+    
+    // Yearly stats for context mapping
+    const yearlyStats: Record<string, { revenue: number, expense: number }> = {};
+    const yearsFound: string[] = [];
 
-    const analyzeSet = count > MAX_LEDGER_ANALYSIS ? ledger.slice(-MAX_LEDGER_ANALYSIS) : ledger;
+    // Full iteration for totals (crucial for SSOT alignment)
+    ledger.forEach(entry => {
+        const amount = entry.amount || 0;
+        const year = (entry.date || "").substring(0, 4);
+        if (year && !yearlyStats[year]) {
+            yearlyStats[year] = { revenue: 0, expense: 0 };
+            yearsFound.push(year);
+        }
 
-        analyzeSet.forEach(entry => {
-            const amount = entry.amount || 0;
-            const acc = (entry.debitAccount || "").trim();
-            const isRevenue = entry.type === 'Revenue' || entry.creditAccount?.includes("매출") || entry.creditAccount?.includes("Revenue");
-            
-            const accId = (entry.debitAccountId || entry.accountId || "").toString();
+        const acc = (entry.debitAccount || "").trim();
+        const isRevenue = entry.type === 'Revenue' || entry.creditAccount?.includes("매출") || entry.creditAccount?.includes("Revenue");
+        const accId = (entry.debitAccountId || entry.accountId || "").toString();
 
-            // Refined Expense Detection: Type is 'Expense' OR 'Payroll' OR ends with '비' (excluding '비품' asset)
-            const isExpense = entry.type === 'Expense' || entry.type === 'Payroll' || 
-                             (acc.endsWith("비") && !acc.includes("비품")) || 
-                             acc.includes("Expense") || acc.includes("비용") ||
-                             acc.includes("지급") || acc.includes("급여") || 
-                             accId.startsWith("acc_8") || accId.startsWith("8") ||
-                             accId.startsWith("acc_5") || accId.startsWith("5");
+        const isExpense = entry.type === 'Expense' || entry.type === 'Payroll' || 
+                         (acc.endsWith("비") && !acc.includes("비품")) || 
+                         acc.includes("Expense") || acc.includes("비용") ||
+                         acc.includes("지급") || acc.includes("급여") || 
+                         accId.startsWith("acc_8") || accId.startsWith("8") ||
+                         accId.startsWith("acc_5") || accId.startsWith("5");
 
-            if (isRevenue) {
-                totalRevenue += amount;
+        if (isRevenue) {
+            totalRevenue += amount;
+            if (year) yearlyStats[year].revenue += amount;
+        }
+        if (isExpense) {
+            totalExpense += amount;
+            if (year) yearlyStats[year].expense += amount;
+            if (amount > largestExpense.amount) {
+                largestExpense = { amount, description: entry.description };
             }
-            if (isExpense) {
-                totalExpense += amount;
-                if (amount > largestExpense.amount) {
-                    largestExpense = { amount, description: entry.description };
-                }
-            }
-        });
+        }
+    });
+
+    // 15 most recent for detail
+    const recentSet = ledger.slice(-15);
 
     return {
         transaction_count: count,
         total_revenue: totalRevenue,
         total_expense: totalExpense,
+        yearly_stats: yearlyStats,
+        years_range: yearsFound.sort().join(", "),
         largest_expense: largestExpense,
-        recent_activity: analyzeSet.slice(-15).map(e => `[${e.date}] ${e.description}: ${e.amount}`).join("\n")
+        recent_activity: recentSet.map(e => `[${e.date}] ${e.description}: ${e.amount}`).join("\n")
     };
 };
 
@@ -88,7 +102,7 @@ export default function AIAssistant() {
     const [messages, setMessages] = useState<Message[]>([
         {
             role: "bot",
-            content: "반갑습니다. AI 감사 분석관입니다. 대량의 데이터에서 리스크 패턴을 찾거나, 경영진 보고를 위한 핵심 요약이 필요하시면 언제든 말씀해 주세요."
+            content: "반갑습니다. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터를 분석하여 경영 의사결정에 필요한 핵심 요약과 리스크 진단을 제공합니다. 궁금하신 경영 지표가 있으신가요?"
         }
     ]);
     const [input, setInput] = useState("");
@@ -103,7 +117,7 @@ export default function AIAssistant() {
         setMessages([
             {
                 role: "bot",
-                content: "반갑습니다. AI 감사 분석관입니다. 대량의 데이터에서 리스크 패턴을 찾거나, 경영진 보고를 위한 핵심 요약이 필요하시면 언제든 말씀해 주세요."
+                content: "반갑습니다. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터를 분석하여 경영 의사결정에 필요한 핵심 요약과 리스크 진단을 제공합니다. 궁금하신 경영 지표가 있으신가요?"
             }
         ]);
     };
@@ -119,22 +133,39 @@ export default function AIAssistant() {
         const summary = summarizeLedger(ledger);
         const financials = context?.financials || { totalAssets: 0, totalLiabilities: 0, netIncome: 0 };
         
+        const yearlyBreakdown = Object.entries(summary.yearly_stats)
+            .map(([yr, stat]) => `- ${yr}년: 수익 ${stat.revenue.toLocaleString()}, 비용 ${stat.expense.toLocaleString()} (KRW)`)
+            .join("\n");
+
         return `
 [AI_CONTEXT]
-Company Rules:
+Identity: AccountingFlow AI CFO Assistant (보좌관)
+Current System Time: 2026-03-22
+Analysis Scope: Simulation years ${summary.years_range} (Entire History)
+
+Goal: You are a high-level CFO Assistant. Speak professionally. Use "AccountingFlow" or "본 시스템" to refer to yourself/the company. NEVER use "AuditFlow" or "오딧플로우".
+
+Company Rules & Knowledge:
 ${context?.companyKnowledge || "N/A"}
 
-Ledger Summary (${summary.transaction_count} transactions total):
-${summary.transaction_count > MAX_LEDGER_ANALYSIS ? "*(Note: Analyzing latest " + MAX_LEDGER_ANALYSIS + " entries)*" : ""}
-- Total Revenue (Analyzed): ${summary.total_revenue.toLocaleString()} KRW
-- Total Expense (Analyzed): ${summary.total_expense.toLocaleString()} KRW
-- Largest Expense: ${summary.largest_expense.description} (${summary.largest_expense.amount.toLocaleString()} KRW)
+Simulation Overall Summary (Total):
+- Period Covered: ${summary.years_range}
+- Total Items: ${summary.transaction_count}
+- Grand Total Revenue: ${summary.total_revenue.toLocaleString()} KRW
+- Grand Total Expense: ${summary.total_expense.toLocaleString()} KRW
 
-Financial Performance:
-- Net Income: ${financials.netIncome?.toLocaleString()} KRW
-- Assets/Liabilities: ${financials.totalAssets?.toLocaleString()} / ${financials.totalLiabilities?.toLocaleString()}
+Yearly Breakdown:
+${yearlyBreakdown}
 
-Recent Activity Highlight:
+Financial Snapshot (as of ${context?.selectedDate || 'latest'}):
+- Total Assets/Liabilities: ${financials.totalAssets?.toLocaleString()} / ${financials.totalLiabilities?.toLocaleString()}
+- Cumulative Net Profit/Loss: ${financials.netIncome?.toLocaleString()} KRW
+
+Notice to AI: 
+If the user asks about P&L or Profit/Loss, always specify which period you are summarizing (e.g., "This is for the entire 3-year period" vs "This is for year 2028").
+If the numbers look different from a specific monthly report, explain that you are giving a cumulative summary of the simulation.
+
+Recent Activity Log (Latest 15):
 ${summary.recent_activity}
 `;
     };
@@ -215,125 +246,142 @@ ${summary.recent_activity}
             <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] bg-indigo-600/5 rounded-full blur-[100px] opacity-20 z-0"></div>
 
             {/* Header Content */}
-            <div className="px-12 pt-12 pb-6 z-10">
-                <div className="flex items-center gap-3 mb-6">
-                    <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-900/20">
-                        <Sparkles className="text-white" size={24} />
+            <div className="px-12 pt-12 pb-6 z-10 backdrop-blur-md bg-[#0B1221]/80 sticky top-0 border-b border-white/5">
+                <div className="max-w-6xl mx-auto">
+                    <div className="flex items-center gap-4 mb-8">
+                        <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-[22px] flex items-center justify-center shadow-2xl shadow-blue-500/20 ring-4 ring-blue-500/10 transition-transform hover:scale-105 duration-500">
+                            <Sparkles className="text-white" size={28} />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-black text-white tracking-tight leading-none mb-1">AI CFO Assistant</h1>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] antialiased">Strategic Accounting Intelligence</span>
+                                <div className="h-1 w-1 rounded-full bg-blue-500/40" />
+                                <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em]">AccountingFlow • Pro</span>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={clearHistory}
+                            className="ml-auto p-3.5 bg-white/5 border border-white/10 rounded-2xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all group flex items-center gap-3 active:scale-95"
+                            title="Clear History"
+                        >
+                            <Trash2 size={18} />
+                            <span className="text-[11px] font-black uppercase tracking-widest hidden group-hover:block transition-all duration-300">Reset Session</span>
+                        </button>
                     </div>
-                    <div>
-                        <h1 className="text-3xl font-black text-white tracking-tight">AI Audit Assistant</h1>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mt-1">Enterprise-Grade Forensic Engine</p>
+                    <div className="flex flex-wrap gap-2.5">
+                        {suggestions.map((s, i) => (
+                            <SuggestionChip key={i} label={s.label} icon={s.icon} onClick={handleSend} />
+                        ))}
+                        <button 
+                            onClick={() => {
+                                setTempKnowledge(context?.companyKnowledge || "");
+                                setShowKnowledgeBase(true);
+                            }}
+                            className="flex items-center gap-2.5 px-5 py-2.5 bg-indigo-600/15 border border-indigo-500/30 rounded-full text-[11px] font-black text-indigo-400 hover:bg-indigo-600 hover:text-white transition-all shadow-xl active:scale-95 group"
+                        >
+                            <BookOpen size={14} className="group-hover:rotate-12 transition-transform" />
+                            KNOWLEDGE BASE 설정
+                        </button>
                     </div>
-                    <button 
-                        onClick={clearHistory}
-                        className="ml-auto p-3 bg-white/5 border border-white/10 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all group flex items-center gap-2"
-                        title="Clear History"
-                    >
-                        <Trash2 size={16} />
-                        <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover:block">Reset Session</span>
-                    </button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    {suggestions.map((s, i) => (
-                        <SuggestionChip key={i} label={s.label} icon={s.icon} onClick={handleSend} />
-                    ))}
-                    <button 
-                        onClick={() => {
-                            setTempKnowledge(context?.companyKnowledge || "");
-                            setShowKnowledgeBase(true);
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 border border-indigo-500/30 rounded-full text-xs font-black text-indigo-400 hover:bg-indigo-600 hover:text-white transition-all shadow-lg active:scale-95"
-                    >
-                        <BookOpen size={12} />
-                        KNOWLEDGE BASE 설정
-                    </button>
                 </div>
             </div>
 
             {/* Chat Container */}
             <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto px-12 py-6 space-y-8 z-10 scroll-smooth custom-scrollbar"
+                className="flex-1 overflow-y-auto px-6 py-10 z-10 scroll-smooth custom-scrollbar"
             >
-                {messages.map((msg, i) => (
-                    <div
-                        key={i}
-                        className={`flex gap-4 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"} animate-in fade-in slide-in-from-bottom-4 duration-500`}
-                    >
-                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg ${msg.role === "bot" ? "bg-slate-800 text-blue-400 border border-white/5" : "bg-blue-600 text-white shadow-blue-900/40"
-                            }`}>
-                            {msg.role === "bot" ? <Bot size={20} /> : <User size={20} />}
-                        </div>
-
-                        <div className={`max-w-[75%] group`}>
-                            <div className={`px-6 py-4 rounded-[24px] shadow-sm border leading-relaxed ${msg.role === "bot"
-                                ? "bg-white/5 border-white/10 text-slate-200"
-                                : "bg-blue-600 border-blue-500 text-white shadow-xl shadow-blue-950/20"
+                <div className="max-w-4xl mx-auto space-y-12">
+                    {messages.map((msg, i) => (
+                        <div
+                            key={i}
+                            className={`flex gap-6 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"} animate-in fade-in slide-in-from-bottom-4 duration-500`}
+                        >
+                            <div className={`w-12 h-12 rounded-[18px] flex items-center justify-center flex-shrink-0 shadow-2xl transition-transform hover:rotate-3 ${msg.role === "bot" 
+                                ? "bg-gradient-to-br from-slate-800 to-slate-900 text-blue-400 border border-white/10 ring-1 ring-white/5" 
+                                : "bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-blue-500/20"
                                 }`}>
-                                <div className="text-[14px] font-medium leading-relaxed">
-                                    <ReactMarkdown
-                                        components={{
-                                            p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
-                                            strong: ({node, ...props}) => <span className="font-black text-blue-400 bg-blue-400/5 px-1 rounded" {...props} />,
-                                            ul: ({node, ...props}) => <ul className="list-disc ml-4 mb-2 space-y-1" {...props} />,
-                                            li: ({node, ...props}) => <li className="pl-1" {...props} />,
-                                        }}
-                                    >
-                                        {msg.content}
-                                    </ReactMarkdown>
+                                {msg.role === "bot" ? <Bot size={24} /> : <User size={24} />}
+                            </div>
+
+                            <div className={`max-w-[85%] group`}>
+                                <div className={`px-8 py-5 rounded-[28px] shadow-2xl border transition-all duration-300 ${msg.role === "bot"
+                                    ? "bg-[#151D2E]/80 backdrop-blur-md border-white/5 text-slate-200 hover:bg-[#151D2E] hover:border-white/10"
+                                    : "bg-blue-600/90 backdrop-blur-sm border-blue-500/30 text-white shadow-blue-500/10 hover:bg-blue-600"
+                                    }`}>
+                                    <div className="text-[15px] font-medium leading-relaxed tracking-wide antialiased">
+                                        <ReactMarkdown
+                                            components={{
+                                                p: ({node, ...props}) => <p className="mb-4 last:mb-0" {...props} />,
+                                                strong: ({node, ...props}) => <span className="font-black text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded-md" {...props} />,
+                                                ul: ({node, ...props}) => <ul className="list-disc ml-5 mb-4 space-y-2 border-l-2 border-white/5 pl-4" {...props} />,
+                                                li: ({node, ...props}) => <li className="pl-1" {...props} />,
+                                                code: ({node, ...props}) => <code className="bg-black/30 px-2 py-0.5 rounded font-mono text-sm text-blue-300" {...props} />,
+                                            }}
+                                        >
+                                            {msg.content}
+                                        </ReactMarkdown>
+                                    </div>
+                                </div>
+                                <div className={`mt-3 flex items-center gap-2.5 px-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${msg.role === "bot" ? "bg-emerald-500 animate-pulse" : "bg-blue-400 opacity-50"}`} />
+                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] antialiased">
+                                        {msg.role === "bot" ? "CFO Intelligence Core" : "Authorized User System"}
+                                    </span>
                                 </div>
                             </div>
-                            <div className={`mt-2 flex items-center gap-2 px-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                                <span className="text-[9px] font-bold text-slate-600 uppercase tracking-tighter">
-                                    {msg.role === "bot" ? "AI ANALYST • ACTIVE" : "AUDITOR • VERIFIED"}
+                        </div>
+                    ))}
+
+                    {isTyping && (
+                        <div className="flex gap-6 animate-in fade-in duration-300">
+                            <div className="w-12 h-12 rounded-[18px] bg-gradient-to-br from-slate-800 to-slate-900 text-blue-400 border border-white/10 flex items-center justify-center flex-shrink-0 animate-pulse">
+                                <Bot size={24} className="animate-bounce duration-1000" />
+                            </div>
+                            <div className="bg-[#151D2E]/80 backdrop-blur-md border border-white/10 px-8 py-5 rounded-[28px] flex items-center gap-4 shadow-2xl">
+                                <Loader2 size={18} className="text-blue-500 animate-spin" />
+                                <span className="text-[12px] font-black text-slate-400 uppercase tracking-[0.3em] font-outfit antialiased">
+                                    Synthesizing Forensic Data...
                                 </span>
                             </div>
                         </div>
-                    </div>
-                ))}
-
-                {isTyping && (
-                    <div className="flex gap-4 animate-in fade-in duration-300">
-                        <div className="w-10 h-10 rounded-2xl bg-slate-800 text-blue-400 border border-white/5 flex items-center justify-center flex-shrink-0">
-                            <Bot size={20} className="animate-pulse" />
-                        </div>
-                        <div className="bg-white/5 border border-white/10 px-6 py-4 rounded-[24px] flex items-center gap-3 shadow-sm">
-                            <Loader2 size={16} className="text-blue-500 animate-spin" />
-                            <span className="text-[11px] font-black text-slate-500 uppercase tracking-[0.2em] antialiased">
-                                Synthesizing insights...
-                            </span>
-                        </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
 
             {/* Input Wrapper */}
-            <div className="px-12 pb-10 pt-4 z-10 bg-gradient-to-t from-[#0B1221] via-[#0B1221] to-transparent">
-                <div className="max-w-[1000px] mx-auto relative group">
-                    <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-[32px] blur opacity-10 group-focus-within:opacity-20 transition-opacity"></div>
-                    <div className="relative flex items-center bg-slate-900 border border-white/10 rounded-[28px] shadow-2xl overflow-hidden focus-within:border-blue-500/50 transition-all">
-                        <div className="pl-6 text-slate-600">
-                            <Wand2 size={24} />
+            <div className="px-12 pb-12 pt-6 z-10 bg-gradient-to-t from-[#0B1221] via-[#0B1221] to-transparent">
+                <div className="max-w-4xl mx-auto relative group">
+                    <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-600/30 to-indigo-600/30 rounded-[35px] blur-xl opacity-0 group-focus-within:opacity-100 transition-all duration-700"></div>
+                    <div className="relative flex items-center bg-[#151D2E]/90 backdrop-blur-2xl border border-white/10 rounded-[30px] shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden focus-within:border-blue-500/50 focus-within:ring-4 ring-blue-500/5 transition-all duration-500">
+                        <div className="pl-8 text-blue-500/60 transition-colors group-focus-within:text-blue-400">
+                            <Wand2 size={26} className="group-hover:rotate-12 transition-transform duration-500" />
                         </div>
                         <input
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                            placeholder="명령어를 입력하거나 궁금한 이상 데이터에 대해 질문하세요..."
-                            className="flex-1 bg-transparent px-4 py-8 text-[15px] font-medium text-white outline-none placeholder:text-slate-600"
+                            placeholder="명령어를 입력하거나 고도화된 이상 데이터에 대한 질문을 남기세요..."
+                            className="flex-1 bg-transparent px-6 py-7 text-[16px] font-bold text-white outline-none placeholder:text-slate-600 antialiased"
                         />
-                        <div className="pr-4">
+                        <div className="pr-5">
                             <button
                                 onClick={() => handleSend()}
-                                disabled={!input.trim()}
-                                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${input.trim()
-                                    ? "bg-blue-600 text-white shadow-xl shadow-blue-900/20 hover:scale-105 active:scale-95"
-                                    : "bg-slate-800 text-slate-600"
+                                disabled={!input.trim() || isTyping}
+                                className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-500 ${input.trim() && !isTyping
+                                    ? "bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-2xl shadow-blue-500/30 hover:scale-105 active:scale-95 translate-x-0"
+                                    : "bg-slate-800 text-slate-600 translate-x-1 opacity-50"
                                     }`}
                             >
-                                <ArrowRight size={24} />
+                                {isTyping ? <Loader2 size={24} className="animate-spin" /> : <ArrowRight size={24} />}
                             </button>
                         </div>
+                    </div>
+                    <div className="mt-4 px-6 flex items-center gap-4 text-[9px] font-black text-slate-600 uppercase tracking-[0.3em]">
+                        <span className="flex items-center gap-1.5"><div className="w-1 h-1 rounded-full bg-blue-500" /> SECURE TUNNEL ACTIVE</span>
+                        <div className="h-1 w-1 rounded-full bg-slate-800" />
+                        <span className="flex items-center gap-1.5"><div className="w-1 h-1 rounded-full bg-emerald-500" /> LEDGER SYNC: 100%</span>
                     </div>
                 </div>
             </div>
@@ -441,7 +489,7 @@ ${summary.recent_activity}
             </AnimatePresence>
 
             <p className="text-center mt-6 text-[10px] font-black text-slate-600 uppercase tracking-[0.3em] opacity-50">
-                Proprietary Forensic engine v4.1.0 • Knowledge Enhanced
+                AccountingFlow CFO Engine v5.0 • Global Integrated
             </p>
             <style dangerouslySetInnerHTML={{
                 __html: `

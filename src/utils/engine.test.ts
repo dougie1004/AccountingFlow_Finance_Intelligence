@@ -23,7 +23,7 @@ describe('Accounting Engine Stabilization Tests', () => {
 
     it('🧪 TEST 2: Aggregation Accuracy (Expected vs Actual)', () => {
         const lines = unrollLedger(mockEntries);
-        const tb = calculateTrialBalance(lines, '2026-01-01', '2026-01-31', 'Actual', CHART_OF_ACCOUNTS);
+        const tb = calculateTrialBalance(lines, '2026-01-01', '2026-01-31', 'actual', CHART_OF_ACCOUNTS);
         
         // After 10,000 in, 2,200 out -> 7,800
         expect(tb['acc_103']?.closingDebit).toBe(7800);
@@ -35,8 +35,8 @@ describe('Accounting Engine Stabilization Tests', () => {
         const lines = unrollLedger(mockEntries);
         const reversedLines = [...lines].reverse();
         
-        const tb1 = calculateTrialBalance(lines, '2026-01-01', '2026-01-31', 'Actual', CHART_OF_ACCOUNTS);
-        const tb2 = calculateTrialBalance(reversedLines, '2026-01-01', '2026-01-31', 'Actual', CHART_OF_ACCOUNTS);
+        const tb1 = calculateTrialBalance(lines, '2026-01-01', '2026-01-31', 'actual', CHART_OF_ACCOUNTS);
+        const tb2 = calculateTrialBalance(reversedLines, '2026-01-01', '2026-01-31', 'actual', CHART_OF_ACCOUNTS);
         
         expect(tb1['acc_103']?.closingDebit).toBe(tb2['acc_103']?.closingDebit);
     });

@@ -498,6 +498,6 @@ export interface MonthlyProjection {
 export interface MacroAssumptions {
     inflationRate: number;      // e.g. 0.03 for 3%
     wageGrowthRate: number;     // e.g. 0.05 for 5%
-    otherExpenseGrowth: number; 
+    otherExpenseGrowth: number;
     revenueNaturalGrowth: number; // Organic growth without strategy
 }

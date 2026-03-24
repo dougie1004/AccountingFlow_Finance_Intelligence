@@ -61,7 +61,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
             title: '경영 및 전략 (STRATEGY)',
             items: [
                 { id: 'dashboard', label: 'CFO 대시보드', description: '실시간 자금 흐름과 전사적 성과 지표를 모니터링합니다.', icon: LayoutDashboard },
-                { id: 'ai-assistant', label: 'AI 지능형 보좌관', description: 'AI assistant에게 경영 및 회계 관련 질문을 합니다.', icon: Sparkles },
                 { id: 'reports', label: '경영 성과 리포트', description: '경영진 전용 보고서를 조회합니다.', icon: TrendingUp },
                 { id: 'strategic-compass', label: '전략 나침반', description: '장기 성장 전략을 수립합니다.', icon: Target },
             ]
@@ -69,6 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
         {
             title: '회계 및 운영 (OPERATIONS)',
             items: [
+                { id: 'ai-assistant', label: 'AI 지능형 보좌관', description: 'AI assistant에게 경영 및 회계 관련 질문을 합니다.', icon: Sparkles },
                 { id: 'cashflow', label: '자금일보 (Daily Cash Report)', description: '금일 자금 흐름과 시세 마감을 관리합니다.', icon: Zap },
                 { id: 'approval-desk', label: 'AI 승인 검토 (Approval)', description: 'AI가 분석한 전표를 최종 검토 및 승인합니다.', icon: ShieldCheck },
                 { id: 'ledger', label: '분개 전표 (Journal)', description: '모든 회계 거래 내역을 관리합니다.', icon: BookOpen },
@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 { id: 'lease-ledger', label: '리스 부채 관리 (IFRS 16)', description: '리스 회계를 처리합니다.', icon: TrendingDown },
                 { id: 'partners-ledger', label: '거래처 원장', description: '거래처별 상세 내역을 확인합니다.', icon: Users },
                 { id: 'partners', label: '거래처 정보 관리', description: '파트너사 데이터를 관리합니다.', icon: Settings },
-                { id: 'budgeting', label: '사업 계획 및 예산', description: '예산 편성 및 실적을 대비합니다.', icon: Target },
+                // { id: 'scenario-manager', label: '사업 계획 및 예산', description: '예산 편성 및 실적을 대비합니다.', icon: Target },
             ]
         }
     ];

@@ -68,7 +68,7 @@ interface Message {
 export const AIAssistantWidget: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([
-        { role: "bot", content: "안녕하세요, 대표님. AI 보좌관입니다. 실시간 장부 데이터와 100% 동기화된 분석 서비스를 제공합니다. 궁금하신 경영 지표나 리스크 항목이 있으신가요?" }
+        { role: "bot", content: "안녕하세요, 대표님. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터와 100% 동기화된 전략적 자금 분석 서비스를 제공합니다. 궁금하신 경영 지표가 있으신가요?" }
     ]);
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
@@ -79,7 +79,7 @@ export const AIAssistantWidget: React.FC = () => {
 
     const clearHistory = () => {
         setMessages([
-            { role: "bot", content: "안녕하세요, 대표님. AI 보좌관입니다. 실시간 장부 데이터와 100% 동기화된 분석 서비스를 제공합니다. 궁금하신 경영 지표나 리스크 항목이 있으신가요?" }
+            { role: "bot", content: "안녕하세요, 대표님. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터와 100% 동기화된 전략적 자금 분석 서비스를 제공합니다. 궁금하신 경영 지표가 있으신가요?" }
         ]);
     };
 
@@ -96,6 +96,9 @@ export const AIAssistantWidget: React.FC = () => {
         
         return `
 [AI_CONTEXT]
+Identity: AccountingFlow AI CFO Assistant
+Goal: You are a professional CFO Assistant. Use "AccountingFlow" or "본 시스템" to refer to the system. NEVER use "AuditFlow".
+
 Company Rules:
 ${companyKnowledge || "표준 회계 규정 준수"}
 
@@ -109,7 +112,7 @@ Latest Ledger Insight (Recent 10 entries):
 ${summary.recent_activity}
 
 [INSTRUCTION]
-If the user asks about periodic performance, prioritize the 'Financial Summary' figures shown above as they calculate net income exactly: (Total Revenue - Total Expense = Current Net Income).
+If the user asks about periodic performance, prioritize the 'Financial Summary' figures shown above. State that these figures are based on the entire simulation period.
 `;
     };
 

@@ -25,6 +25,7 @@ import { calculateRunway, calculateAvgBurn } from '../core/metrics/metricRegistr
 import { generateCFOInsight, INSIGHT_UI_MAP } from '../engines/cfoInsight';
 
 
+
 import { verifyJournalIntegrity } from '../utils/debugIntegrity';
 import { generateMonthlyPnL } from '../core/reporting/generateMonthlyPnL';
 import { generateCashFlow } from '../core/reporting/generateCashFlow';
@@ -650,7 +651,7 @@ const StrategicCompass: React.FC = () => {
         // 2. Net Profit
         const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
 
-        // 3. Runway (SSOT Implementation V2.6)
+        // 3. Runway (Deterministic Strategy Execution)
         const currentCash = financials.cash; // Latest actual cash ONLY
         const futureCashDeltas = scenarioCashFlow.map(cf => cf.delta);
 
@@ -659,27 +660,23 @@ const StrategicCompass: React.FC = () => {
             futureCashDeltas
         });
 
-        // 🧪 Validation Log
-        console.log("RUNWAY_CHECK", {
-            currentCash,
-            sampleDeltas: futureCashDeltas.slice(0, 5),
-            runway: runwayVal
-        });
-
-        const avgBurnVal = calculateAvgBurn(futureCashDeltas);
+        // [V2.6] Liquidity Runway: Adjusted for unsettled liabilities
+        const liquidRunwayVal = liquidCash.value > 0 ? liquidCash.value / (calculateAvgBurn(futureCashDeltas) || 1) : 0;
 
         const runway = {
             value: runwayVal,
             inputs: { 
-                '현재 현금 잔액': currentCash, 
-                '월 평균 소모액 (시나리오)': Math.round(avgBurnVal) 
+                'Gross Cash': currentCash, 
+                'Liquid Cash (Net)': liquidCash.value,
+                'Monthly Avg Burn': Math.round(calculateAvgBurn(futureCashDeltas)) 
             },
-            formula: '현금 / 월 평균 소모액 (시나리오)',
+            formula: 'Cash / Avg Burn (scenario)',
             period: '시뮬레이션 예측',
             dataSource: 'scenario' as any,
             monthlyDeltas: scenarioCashFlow.map(cf => ({ date: cf.date, cashDelta: cf.delta }))
         };
         const projectedRunway = runway;
+        const liquidityRunway = { ...runway, value: liquidRunwayVal, label: 'Liquidity Runway' };
 
         // 4. Scenario Profit (Simplified)
         const burnMonths = projectionLedger.filter(e => e.date > selectedDate);
@@ -690,6 +687,7 @@ const StrategicCompass: React.FC = () => {
             actualNetProfit,
             runway,
             projectedRunway,
+            liquidityRunway,
             scenarioProfit: {
                 value: scenarioProfitTotal,
                 inputs: { '분석 대상 개월 수': Array.from(new Set(burnMonths.map(m => m.date.substring(0, 7)))).length },
@@ -698,7 +696,7 @@ const StrategicCompass: React.FC = () => {
                 dataSource: 'scenario' as any
             }
         };
-    }, [financials, trialBalance, projectionLedger, selectedDate, getProfitDelta, scenarioCashFlow]);
+    }, [financials, trialBalance, projectionLedger, selectedDate, getProfitDelta, scenarioCashFlow, scenarioPnL]);
 
 
     const stats = useMemo(() => {
@@ -739,7 +737,10 @@ const StrategicCompass: React.FC = () => {
         const deathValleyMessage = projectionStatus.message;
 
         const burnMultipleResult = MetricRegistry.calculateBurnMultiple(projectionLedger, selectedDate);
+
+        // [PHASE 10 Refinement] Rename "Probability" to "Score"
         const survivalProbResult = MetricRegistry.calculateSurvivalProbability(runwayMonths);
+        const survivalScore = survivalProbResult.value;
 
         const rawInsight = generateCFOInsight({
             projection: chartData,
@@ -892,8 +893,8 @@ const StrategicCompass: React.FC = () => {
                 futureCashDeltas: futureDeltas.slice(di)
             });
             const dBurnMonths = futureDeltas.slice(di).filter(d => d < 0);
-            const dAvgBurn = dBurnMonths.length > 0 
-                ? dBurnMonths.reduce((a, b) => a + Math.abs(b), 0) / dBurnMonths.length 
+            const dAvgBurn = dBurnMonths.length > 0
+                ? dBurnMonths.reduce((a, b) => a + Math.abs(b), 0) / dBurnMonths.length
                 : 0;
             const dFundingNeeded = requiredFunding(dRemRunway, 18, dAvgBurn);
             const dDilution = calculateDilution(preMoneyValuation || 500000000, dFundingNeeded);
@@ -1126,7 +1127,7 @@ const StrategicCompass: React.FC = () => {
                 </section>
 
                 {/* Row 2: KPI Summary - Compressed vertical space */}
-                <div className="grid grid-cols-2 lg:grid-cols-7 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-8 gap-4">
                     <ExplainableKPI
                         label="번 멀티플 (Burn Multiple)"
                         result={stats?.burnMultipleResult || null}
@@ -1139,6 +1140,13 @@ const StrategicCompass: React.FC = () => {
                         result={stats?.projectedRunway || null}
                         description="미래 시나리오를 가미했을 때의 유동성 상태입니다."
                         color={(stats?.projectedRunwayMonths ?? 0) >= 12 ? 'text-emerald-400' : 'text-rose-400'}
+                        formatValue={(v) => v === Infinity ? "무한" : `${v.toFixed(1)}개월`}
+                    />
+                    <ExplainableKPI
+                        label="유동성 런웨이 (Liquidity Runway)"
+                        result={stats?.liquidityRunway || null}
+                        description="미지급금을 차감한 순 가용 유동성 기준의 런웨이입니다. (V2.6 SSOT)"
+                        color={(stats?.liquidityRunway?.value ?? 0) >= 6 ? 'text-blue-400' : 'text-rose-400'}
                         formatValue={(v) => v === Infinity ? "무한" : `${v.toFixed(1)}개월`}
                     />
                     <ExplainableKPI
@@ -1308,29 +1316,29 @@ const StrategicCompass: React.FC = () => {
                                     color="accent-amber-500"
                                     trend={expenseMult <= 1 ? 'emerald' : 'rose'}
                                 />
-                                    <SimulationSlider
-                                        label="신규 투자 규모 (Investment)"
-                                        val={fixedCostDelta}
-                                        setVal={setFixedCostDelta}
-                                        min={0} max={100_000_000} step={1_000_000}
-                                        color="accent-indigo-500"
-                                        isCurrency
-                                    />
-                                    <div className="space-y-2 mt-4">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Pre-Money Valuation</label>
-                                            <span className="text-[10px] font-black italic text-purple-400">₩{(preMoneyValuation / 100_000_000).toFixed(1)}억</span>
-                                        </div>
-                                        <input
-                                            type="range"
-                                            min={100_000_000}
-                                            max={100_000_000_000}
-                                            step={100_000_000}
-                                            value={preMoneyValuation}
-                                            onChange={(e) => setPreMoneyValuation(Number(e.target.value))}
-                                            className="w-full h-1.5 bg-purple-500/10 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                                        />
+                                <SimulationSlider
+                                    label="신규 투자 규모 (Investment)"
+                                    val={fixedCostDelta}
+                                    setVal={setFixedCostDelta}
+                                    min={0} max={100_000_000} step={1_000_000}
+                                    color="accent-indigo-500"
+                                    isCurrency
+                                />
+                                <div className="space-y-2 mt-4">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">Pre-Money Valuation</label>
+                                        <span className="text-[10px] font-black italic text-purple-400">₩{(preMoneyValuation / 100_000_000).toFixed(1)}억</span>
                                     </div>
+                                    <input
+                                        type="range"
+                                        min={100_000_000}
+                                        max={100_000_000_000}
+                                        step={100_000_000}
+                                        value={preMoneyValuation}
+                                        onChange={(e) => setPreMoneyValuation(Number(e.target.value))}
+                                        className="w-full h-1.5 bg-purple-500/10 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                    />
+                                </div>
                             </div>
                         </section>
 
@@ -1547,12 +1555,12 @@ const StrategicCompass: React.FC = () => {
                                                 stroke="#ef4444"
                                                 strokeWidth={3}
                                                 strokeDasharray="6 6"
-                                                label={{ 
-                                                  value: `Runway < 6m → Funding (${fundingEvent.remainingRunway?.toFixed(1)}m)`, 
-                                                  position: "top", 
-                                                  fill: "#ef4444", 
-                                                  fontSize: 10, 
-                                                  fontWeight: 900 
+                                                label={{
+                                                    value: `Runway < 6m → Funding (${fundingEvent.remainingRunway?.toFixed(1)}m)`,
+                                                    position: "top",
+                                                    fill: "#ef4444",
+                                                    fontSize: 10,
+                                                    fontWeight: 900
                                                 }}
                                             />
                                         )}
@@ -1562,12 +1570,12 @@ const StrategicCompass: React.FC = () => {
                                                 stroke="#ff0000"
                                                 strokeWidth={3}
                                                 strokeDasharray="3 3"
-                                                label={{ 
-                                                  value: `CASH ZERO (FAILURE) 💀`, 
-                                                  position: "bottom", 
-                                                  fill: "#ff0000", 
-                                                  fontSize: 10, 
-                                                  fontWeight: 900 
+                                                label={{
+                                                    value: `CASH ZERO (FAILURE) 💀`,
+                                                    position: "bottom",
+                                                    fill: "#ff0000",
+                                                    fontSize: 10,
+                                                    fontWeight: 900
                                                 }}
                                             />
                                         )}
@@ -1675,8 +1683,8 @@ const StrategicCompass: React.FC = () => {
                                                     <div className="flex justify-between items-center text-[9px] font-bold text-slate-400">
                                                         <span>경영권 상태:</span>
                                                         <span className={`italic ${dilutionAnalysis.controlState === 'ABSOLUTE_CONTROL' ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                                            {dilutionAnalysis.controlState === 'ABSOLUTE_CONTROL' ? '절대 경영권 확보' : 
-                                                             dilutionAnalysis.controlState === 'MAJORITY_CONTROL' ? '과반 경영권 유지' : '경영권 취약'}
+                                                            {dilutionAnalysis.controlState === 'ABSOLUTE_CONTROL' ? '절대 경영권 확보' :
+                                                                dilutionAnalysis.controlState === 'MAJORITY_CONTROL' ? '과반 경영권 유지' : '경영권 취약'}
                                                         </span>
                                                     </div>
 

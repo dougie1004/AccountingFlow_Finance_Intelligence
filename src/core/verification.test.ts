@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateMultiYearSimulation } from './simulation/journalGenerator';
-import { generateMonthlyPnL } from './reporting/monthlyReporter';
+import { generateMonthlyPnL } from './reporting/generateMonthlyPnL';
 import { SCENARIO_CONFIGS } from './simulation/scenarioConfigs';
 import { unrollJournalToLedger, calculateTrialBalance } from './engine';
 import { calculateFinancialsFromTB } from './reporting/incomeStatement';

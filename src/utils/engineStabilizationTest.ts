@@ -33,7 +33,7 @@ export const runStabilizationTest = () => {
     // --- TEST 1: EXPECTED VS ACTUAL (Scenario 4 Focus) ---
     results.push("--- TEST 1: Granular Accuracy Check ---");
     const lines = unrollLedger(mockLedger);
-    const tb = calculateTrialBalance(lines, '2026-01-01', '2026-03-31', 'Actual', CHART_OF_ACCOUNTS);
+    const tb = calculateTrialBalance(lines, '2026-01-01', '2026-03-31', 'actual', CHART_OF_ACCOUNTS);
     
     assert("Cash Balance (After S1, S2)", 97800000, tb['acc_103']?.closingDebit || 0);
     assert("Sales Revenue (S4)", 20000000, tb['acc_401']?.closingCredit || 0);
@@ -42,7 +42,7 @@ export const runStabilizationTest = () => {
     // --- TEST 2: LEDGER ORDERING INDEPENDENCE ---
     results.push("--- TEST 2: Ledger Ordering Test ---");
     const reversedLines = [...lines].reverse();
-    const tbReversed = calculateTrialBalance(reversedLines, '2026-01-01', '2026-03-31', 'Actual', CHART_OF_ACCOUNTS);
+    const tbReversed = calculateTrialBalance(reversedLines, '2026-01-01', '2026-03-31', 'actual', CHART_OF_ACCOUNTS);
     const isOrderIndependent = (tb['acc_103']?.closingDebit === tbReversed['acc_103']?.closingDebit);
     if (isOrderIndependent) {
         passCount++;
@@ -82,7 +82,7 @@ const unrollLedger = (entries: JournalEntry[]): LedgerLine[] => {
         const vat = entry.vat || 0;
         const total = base + vat;
         const add = (acc: string, db: number, cr: number, id?: string) => {
-            lines.push({ id: entry.id, date: entry.date, description: entry.description, account: acc, accountId: id, debit: db, credit: cr, type: entry.type, scope: 'Actual' });
+            lines.push({ id: entry.id, date: entry.date, description: entry.description, account: acc, accountId: id, debit: db, credit: cr, type: entry.type, scope: 'actual' });
         };
         if (entry.type === 'Revenue') {
             add(entry.debitAccount, total, 0, entry.debitAccountId);

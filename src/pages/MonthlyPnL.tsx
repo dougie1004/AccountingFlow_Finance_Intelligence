@@ -13,9 +13,10 @@ import { SCENARIO_CONFIGS } from '../core/simulation/scenarioConfigs';
 export const MonthlyPnL: React.FC = () => {
     const { ledger: actualLedger, selectedDate } = useContext(AccountingContext)!;
     const [selectedYear, setSelectedYear] = useState<number | 'ALL'>('ALL');
-    const [selectedScenario, setSelectedScenario] = useState<string>('STANDARD');
+    const [selectedScenario, setSelectedScenario] = useState<string>('ACTUAL');
 
     const SCENARIO_PRESETS = [
+        { id: 'ACTUAL', name: '실제 (Actual)', color: 'hover:bg-indigo-500/20 text-indigo-400 border-indigo-500/30' },
         { id: 'SURVIVAL', name: '생존 (Survival)', color: 'hover:bg-rose-500/20 text-rose-400 border-rose-500/30' },
         { id: 'STANDARD', name: '표준 (Standard)', color: 'hover:bg-blue-500/20 text-blue-400 border-blue-500/30' },
         { id: 'GROWTH', name: '성장 (Growth)', color: 'hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
@@ -29,12 +30,15 @@ export const MonthlyPnL: React.FC = () => {
     };
 
     const analytics = useMemo(() => {
-        // Generate simulated ledger for the selected scenario
-        // Rules: In Simulation Mode, we use the pure generator.
-        const simulatedResult = generateMultiYearSimulation([2026, 2027, 2028], SCENARIO_CONFIGS[selectedScenario]);
-        const simLedger = simulatedResult.ledger;
+        // [V2.6] Enhanced Truth Engine: Merge Actual Ledger with Simulation
+        let simLedger: any[] = [];
+        if (selectedScenario !== 'ACTUAL') {
+            const simulatedResult = generateMultiYearSimulation([2026, 2027, 2028], SCENARIO_CONFIGS[selectedScenario]);
+            simLedger = simulatedResult.ledger;
+        }
 
-        const tableData = generateMonthlyPnL(simLedger, [2026, 2027, 2028], selectedDate);
+        // Unified SSOT for P&L
+        const tableData = generateMonthlyPnL([...actualLedger, ...simLedger], [2026, 2027, 2028], selectedDate);
         
         // [Dynamic Context] Filter data used for Sensitivity/Leverage based on Selected Year
         const kpiBaseData = selectedYear === 'ALL' 
