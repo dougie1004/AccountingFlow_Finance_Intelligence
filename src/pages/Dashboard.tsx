@@ -322,6 +322,10 @@ export const Dashboard = () => {
                                         <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
                                         <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                                     </linearGradient>
+                                    <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                    </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
                                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
@@ -332,14 +336,16 @@ export const Dashboard = () => {
                                         const labelMap: Record<string, string> = {
                                             operatingIncome: '영업 매출',
                                             grantIncome: '영업외 수익 (지원금)',
-                                            expense: '지출'
+                                            expense: '지출',
+                                            operatingProfit: '영업 이익 (OP. PROFIT)'
                                         };
-                                        return [`₩${(value || 0).toLocaleString()}`, labelMap[name] || name];
+                                        return [`₩${(value ?? 0).toLocaleString()}`, labelMap[name] || name];
                                     }}
                                 />
                                 <Area stackId="1" type="monotone" dataKey="operatingIncome" name="operatingIncome" stroke="#10b981" fillOpacity={1} fill="url(#colorOperating)" />
                                 <Area stackId="1" type="monotone" dataKey="grantIncome" name="grantIncome" stroke="#3b82f6" fillOpacity={1} fill="url(#colorGrant)" />
                                 <Area type="monotone" dataKey="expense" name="expense" stroke="#ef4444" fillOpacity={1} fill="url(#colorExpense)" />
+                                <Area type="monotone" dataKey="operatingProfit" name="operatingProfit" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorProfit)" strokeWidth={3} />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>

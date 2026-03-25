@@ -8,6 +8,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from "framer-motion";
 import { AccountingContext } from "../context/AccountingContext";
+import { AiChatMessage } from "../types";
 
 // Tauri invoke wrapper
 const safeInvoke = async (cmd: string, args?: any) => {
@@ -22,7 +23,7 @@ const safeInvoke = async (cmd: string, args?: any) => {
 
 const MAX_LEDGER_ANALYSIS = 500;
 
-const summarizeLedger = (ledger: any[]) => {
+const summarizeLedger = (ledger: any[], targetYearMonth?: string) => {
     const count = ledger.length;
     let totalRevenue = 0;
     let totalExpense = 0;
@@ -32,10 +33,17 @@ const summarizeLedger = (ledger: any[]) => {
     const yearlyStats: Record<string, { revenue: number, expense: number }> = {};
     const yearsFound: string[] = [];
 
+    // Monthly-specific aggregation for current month monitoring
+    const currentMonthItems: any[] = [];
+    const now = targetYearMonth || "2028-12"; 
+
     // Full iteration for totals (crucial for SSOT alignment)
     ledger.forEach(entry => {
         const amount = entry.amount || 0;
-        const year = (entry.date || "").substring(0, 4);
+        const entryDate = entry.date || "";
+        const year = entryDate.substring(0, 4);
+        const yearMonth = entryDate.substring(0, 7);
+
         if (year && !yearlyStats[year]) {
             yearlyStats[year] = { revenue: 0, expense: 0 };
             yearsFound.push(year);
@@ -62,11 +70,14 @@ const summarizeLedger = (ledger: any[]) => {
             if (amount > largestExpense.amount) {
                 largestExpense = { amount, description: entry.description };
             }
+            if (yearMonth === now) {
+                currentMonthItems.push(entry);
+            }
         }
     });
 
     // 15 most recent for detail
-    const recentSet = ledger.slice(-15);
+    const recentSet = ledger.slice(-20);
 
     return {
         transaction_count: count,
@@ -75,15 +86,10 @@ const summarizeLedger = (ledger: any[]) => {
         yearly_stats: yearlyStats,
         years_range: yearsFound.sort().join(", "),
         largest_expense: largestExpense,
-        recent_activity: recentSet.map(e => `[${e.date}] ${e.description}: ${e.amount}`).join("\n")
+        current_month_detail: currentMonthItems.map(e => `[${e.date}] ${e.description}: ${e.amount.toLocaleString()} KRW`).join("\n"),
+        recent_activity: recentSet.map(e => `[${e.date}] ${e.description}: ${e.amount.toLocaleString()} KRW (Type: ${e.scope || 'Actual'})`).join("\n")
     };
 };
-
-interface Message {
-    role: "bot" | "user";
-    content: string;
-    type?: "standard" | "management" | "search";
-}
 
 const SuggestionChip = ({ label, onClick, icon: Icon }: any) => (
     <button
@@ -98,13 +104,8 @@ const SuggestionChip = ({ label, onClick, icon: Icon }: any) => (
 export default function AIAssistant() {
     const context = useContext(AccountingContext);
     const tenantId = context?.config.tenantId || "default-tenant";
-
-    const [messages, setMessages] = useState<Message[]>([
-        {
-            role: "bot",
-            content: "반갑습니다. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터를 분석하여 경영 의사결정에 필요한 핵심 요약과 리스크 진단을 제공합니다. 궁금하신 경영 지표가 있으신가요?"
-        }
-    ]);
+    const messages = context?.aiMessages || [];
+    const setMessages = context?.setAiMessages || (() => {});
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -114,12 +115,7 @@ export default function AIAssistant() {
 
 
     const clearHistory = () => {
-        setMessages([
-            {
-                role: "bot",
-                content: "반갑습니다. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터를 분석하여 경영 의사결정에 필요한 핵심 요약과 리스크 진단을 제공합니다. 궁금하신 경영 지표가 있으신가요?"
-            }
-        ]);
+        context?.clearAiMessages();
     };
 
     useEffect(() => {
@@ -129,8 +125,13 @@ export default function AIAssistant() {
     }, [messages, isTyping]);
 
     const buildAIContext = () => {
-        const ledger = context?.ledger || [];
-        const summary = summarizeLedger(ledger);
+        const actualLedger = context?.ledger || [];
+        const scenarioLedger = context?.scenarioResults || [];
+        
+        // Target specifically 2028-12 for this context
+        const summary = summarizeLedger(actualLedger, "2028-12");
+        const scenarioSummary = scenarioLedger.length > 0 ? summarizeLedger(scenarioLedger, "2028-12") : null;
+        
         const financials = context?.financials || { totalAssets: 0, totalLiabilities: 0, netIncome: 0 };
         
         const yearlyBreakdown = Object.entries(summary.yearly_stats)
@@ -140,33 +141,31 @@ export default function AIAssistant() {
         return `
 [AI_CONTEXT]
 Identity: AccountingFlow AI CFO Assistant (보좌관)
-Current System Time: 2026-03-22
-Analysis Scope: Simulation years ${summary.years_range} (Entire History)
+Current System Time: 2026-03-24 (Analysis focusing on current month Dec 2028 per logs)
+Primary Data Source: Actual Ledger (확정 장부)
 
-Goal: You are a high-level CFO Assistant. Speak professionally. Use "AccountingFlow" or "본 시스템" to refer to yourself/the company. NEVER use "AuditFlow" or "오딧플로우".
-
-Company Rules & Knowledge:
-${context?.companyKnowledge || "N/A"}
-
-Simulation Overall Summary (Total):
-- Period Covered: ${summary.years_range}
+--- ACTUAL DATA (REAL WORLD) ---
+- Period: ${summary.years_range}
+- Current Month (2028-12) Detailed Expenses:
+${summary.current_month_detail || "No entries for this month yet."}
 - Total Items: ${summary.transaction_count}
-- Grand Total Revenue: ${summary.total_revenue.toLocaleString()} KRW
-- Grand Total Expense: ${summary.total_expense.toLocaleString()} KRW
+- Grand Total Revenue/Expense: ${summary.total_revenue.toLocaleString()} / ${summary.total_expense.toLocaleString()} KRW
 
-Yearly Breakdown:
+--- SCENARIO DATA (STRATEGIC PROJECTION) ---
+${scenarioSummary ? `
+- Scenario items detected. Note: These are NOT actual transactions.
+- Scenario 2028-12 Mock Expenses:
+${scenarioSummary.current_month_detail}
+` : "No active strategic scenario currently mapped."}
+
+--- YEARLY PERFORMANCE (ACTUAL) ---
 ${yearlyBreakdown}
 
-Financial Snapshot (as of ${context?.selectedDate || 'latest'}):
-- Total Assets/Liabilities: ${financials.totalAssets?.toLocaleString()} / ${financials.totalLiabilities?.toLocaleString()}
-- Cumulative Net Profit/Loss: ${financials.netIncome?.toLocaleString()} KRW
-
-Notice to AI: 
-If the user asks about P&L or Profit/Loss, always specify which period you are summarizing (e.g., "This is for the entire 3-year period" vs "This is for year 2028").
-If the numbers look different from a specific monthly report, explain that you are giving a cumulative summary of the simulation.
-
-Recent Activity Log (Latest 15):
-${summary.recent_activity}
+[STRICT GUIDELINE]
+1. If the user asks about "this month" or "current status", ALWAYS analyze the "ACTUAL DATA" first.
+2. If Actual Data for 2028-12 exists, use it as the primary truth. (e.g., Marketing 8,000,000 KRW).
+3. If the user asks "why is it different?", explain that the actual ledger says X, but your strategic scenario (with multipliers) predicts Y.
+4. DO NOT sum entries from different months when reporting monthly totals.
 `;
     };
 
@@ -176,7 +175,7 @@ ${summary.recent_activity}
         const text = customText || input;
         if (!text.trim()) return;
 
-        const userMsg: Message = { role: "user", content: text };
+        const userMsg: AiChatMessage = { role: "user", content: text };
         setMessages(prev => [...prev, userMsg]);
         setInput("");
         setIsTyping(true);

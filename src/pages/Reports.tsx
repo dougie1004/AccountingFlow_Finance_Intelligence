@@ -4,7 +4,7 @@ import {
     Download, 
     Share2, 
     ArrowLeft, 
-    ShieldCheck, 
+    ShieldCheck as ShieldCheckIcon, 
     TrendingUp, 
     Zap, 
     Activity, 
@@ -13,10 +13,16 @@ import {
     Calendar,
     ChevronDown,
     Flag,
-    TrendingDown
+    TrendingDown,
+    AlertTriangle,
+    Database,
+    Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
+import { MetricRegistry } from '../core/reporting/metricRegistry';
+import { projectScenarioFrontend } from '../core/simulation/strategicSimulator';
+import { calculateRunway as calculateStdRunway } from '../core/metrics/metricRegistry';
 
 const KPIProgress: React.FC<{ label: string, val: number, color: string }> = ({ label, val, color }) => (
     <div>
@@ -39,7 +45,21 @@ const Target = ({ size }: { size: number }) => (
 );
 
 export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab }) => {
-    const { financials, finalizedMonths, setSelectedDate, trialBalance, selectedDate } = useAccounting();
+    const { 
+        financials, 
+        finalizedMonths, 
+        setSelectedDate, 
+        trialBalance, 
+        selectedDate,
+        baselineEntries,
+        scenarioResults,
+        ledger: globalLedger,
+        revenueMult,
+        expenseMult,
+        fixedCostDelta,
+        macro,
+        projectionMonths
+    } = useAccounting();
     const [selectedPeriod, setSelectedPeriod] = useState(() => {
         const [y, m] = selectedDate.split('-');
         return `${y}-${m}`;
@@ -62,27 +82,74 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
 
     const isClosed = finalizedMonths[selectedPeriod] === 'soft' || finalizedMonths[selectedPeriod] === 'hard';
 
-    // [V2.7] AI CFO Executive Insight Generator
+    // [V2.7.2] AI CFO Executive Insight Generator (Standardized Runway)
     const executiveInsight = useMemo(() => {
-        if (!financials) return null;
+        if (!financials || !trialBalance) return null;
 
         const isProfitable = financials.netIncome > 0;
-        const revenueGrowth = financials.revenue > 0;
         const opexRatio = (financials.expenses / (financials.revenue || 1)) * 100;
         const cashRatio = (financials.cash / (financials.totalAssets || 1)) * 100;
         
+        // 1. Calculate Liquidity (Net of Payables)
+        const liquidityResult = MetricRegistry.calculateLiquidity(trialBalance);
+        const liquidCash = liquidityResult.value;
+
+        // 2. Projected Runway Calculation (Unified SSOT via MetricRegistry)
+        let simulationSubset = (scenarioResults && scenarioResults.length > 0) ? scenarioResults : baselineEntries;
+        let runwaySource = (scenarioResults && scenarioResults.length > 0) ? 'simulation' : (baselineEntries.length > 0 ? 'baseline' : 'history');
+
+        // [V2.7.3] Redundancy Guard: If no global simulation exists, run a local one with current multipliers
+        if (simulationSubset.length === 0 && globalLedger.length > 0) {
+            try {
+                // Ensure ledger is sorted as required by engine
+                const anchorDate = selectedDate; 
+                simulationSubset = projectScenarioFrontend(
+                    [...globalLedger].sort((a,b) => a.date.localeCompare(b.date)),
+                    anchorDate,
+                    { revenueMult, expenseMult, fixedCostDelta },
+                    macro,
+                    projectionMonths
+                );
+                runwaySource = 'simulation';
+                console.log(`[Reports] Auto-Sync simulation triggered for ${anchorDate}`);
+            } catch (err) {
+                console.warn("[Reports] Auto-sync simulation failed, falling back to history", err);
+            }
+        }
+        
+        const activeSimulation = simulationSubset;
+        let runwayMetric = (activeSimulation && activeSimulation.length > 0)
+            ? MetricRegistry.calculateProjectedRunway(liquidCash, activeSimulation, selectedDate)
+            : MetricRegistry.calculateRunway(liquidCash, globalLedger, selectedDate);
+        
+        let runway = runwayMetric.value;
+        if (runwayMetric.dataSource === 'actual') runwaySource = 'history';
+        const liquidityRunway = runway; 
+
         // Detect specific accounts
         const hasLease = Object.values(trialBalance).some(v => 
             (v.meta.name.includes('리스') || v.meta.code.startsWith('24')) && 
             (v.closingDebit !== 0 || v.closingCredit !== 0)
         );
 
+        // Healthy only if profitable OR has > 12 months of runway
+        const isHealthy = isProfitable || runway > 12;
+
         const observations = isProfitable 
             ? `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 순이익은 효율적인 비용 통제와 매출 성장이 맞물린 결과입니다. 현재의 이익 구조를 유지하면서 신규 성장 동력을 확보하는 전략이 유효합니다.`
-            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 매출 대비 비용(Opex Ratio: ${opexRatio.toFixed(1)}%) 비중이 높음을 시사합니다. 고정비 효율화와 단기 매출 확보가 시급한 시점입니다.`;
+            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 높은 비용 비중(Opex Ratio: ${opexRatio.toFixed(1)}%)을 시사합니다. ${runway < 6 ? `현재 소모액 기준 생존 기간이 ${runway.toFixed(1)}개월로 매우 촉박합니다.` : '단기 매출 확보와 고정비 효율화가 시급한 시점입니다.'}`;
 
         const highlightedItems = [];
-        if (cashRatio > 30) highlightedItems.push(`현금 유동성 비중이 ${cashRatio.toFixed(1)}%로 매우 견고합니다.`);
+        if (cashRatio > 30) {
+            if (isHealthy) {
+                highlightedItems.push(`현금 유동성 비중이 ${cashRatio.toFixed(1)}%로 매우 견고하며 장기 운영을 위한 체력을 확보하고 있습니다.`);
+            } else if (runway > 3) {
+                highlightedItems.push(`자산 중 현금 비중(${cashRatio.toFixed(1)}%)은 높으나, 현재의 월간 손실액(Runway ${runway.toFixed(1)}개월)을 고려할 때 유동성 보존을 최우선으로 해야 합니다.`);
+            } else {
+                highlightedItems.push(`자산의 ${cashRatio.toFixed(1)}%가 현금이지만, 현재 지출 속도라면 3개월 내 고갈 위험이 있는 위기 상태입니다.`);
+            }
+        }
+
         if (hasLease) highlightedItems.push("장기 리스 및 외부 부채 관리가 안정적으로 수행되고 있습니다.");
         else highlightedItems.push("외부 차입금 없는 자기자본 중심의 건전한 재무 구조가 유지되고 있습니다.");
 
@@ -98,11 +165,17 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
 
         return {
             observations,
-            status: isProfitable ? 'Healthy' : 'Critical',
+            status: isHealthy ? 'Healthy' : 'Critical',
             highlights: highlightedItems.join(' '),
-            roadmap
+            roadmap,
+            runway,
+            liquidityRunway,
+            cashRatio,
+            runwaySource,
+            runwayLabel: runwaySource === 'simulation' ? 'Strategic Simulation (AI)' : (runwaySource === 'history' ? '3M Historical Average' : 'Macro Baseline Projection'),
+            runwayAlertLabel: runwaySource === 'simulation' ? '시뮬레이션(Strategy)' : (runwaySource === 'history' ? '과거 실적(History)' : '미래 예측(Baseline)')
         };
-    }, [financials, trialBalance]);
+    }, [financials, trialBalance, baselineEntries, scenarioResults, globalLedger, selectedDate]);
 
     // Years and Months for selection
     const years = [2026, 2027, 2028];
@@ -185,7 +258,7 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
 
                 <div className="flex items-center gap-4">
                     <PremiumDatePicker 
-                        value={`${selectedPeriod}-01`} 
+                        value={selectedDate} 
                         onChange={handlePeriodChange} 
                     />
                     <div className="w-[1px] h-8 bg-white/5 mx-2" />
@@ -234,7 +307,12 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                     </div>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">기말 현금 잔액 <span className="text-slate-600">(CASH)</span></p>
                     <h2 className="text-3xl font-black text-emerald-400 tracking-tighter italic">₩{financials.cash.toLocaleString()}</h2>
-                    <p className="text-[10px] text-slate-500 mt-2 font-black uppercase tracking-widest">현금 유동성 확보됨</p>
+                    <p className={`text-[10px] mt-2 font-black uppercase tracking-widest ${executiveInsight?.runway && executiveInsight.runway < 6 ? 'text-rose-400' : 'text-slate-500'}`}>
+                        {executiveInsight?.runway && executiveInsight.runway < 24 ? `Projected Runway: ${executiveInsight.runway.toFixed(1)}개월` : '현금 유동성 충분함'}
+                    </p>
+                    <p className="text-[8px] text-slate-600 font-bold uppercase tracking-widest mt-1 italic">
+                        Calc Model: {executiveInsight?.runwayLabel}
+                    </p>
                 </div>
             </div>
 
@@ -243,12 +321,12 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                 {/* AI CFO 경영 브리핑 */}
                 <div className="xl:col-span-2 bg-[#121626] border-2 border-indigo-500/30 p-12 rounded-[3rem] shadow-3xl relative overflow-hidden group">
                     <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-[0.05] pointer-events-none group-hover:scale-110 transition-transform">
-                        <ShieldCheck size={400} />
+                        <ShieldCheckIcon size={400} />
                     </div>
                     <div className="relative z-10">
                         <div className="flex items-center gap-6 mb-12">
                             <div className="w-16 h-16 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-2xl shadow-indigo-600/40 border border-indigo-400/30">
-                                <ShieldCheck size={32} />
+                                <ShieldCheckIcon size={32} />
                             </div>
                             <div>
                                 <h2 className="text-2xl font-black text-white tracking-tight italic">AI CFO Tactical Insight</h2>
@@ -269,6 +347,19 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                                     </p>
                                     <p>
                                         현재의 지출 흐름이 지속될 경우 차기 분기 유동성 가용성을 기반으로 한 {executiveInsight?.status === 'Healthy' ? '안정적 확장' : '방어적 운영'} 전략이 필요할 것으로 AI는 예측하고 있습니다.
+                                        {executiveInsight?.runway && executiveInsight.runway < 12 && (
+                                            <div className="space-y-3">
+                                                <span className="block mt-4 p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-sm font-black italic shadow-lg animate-pulse">
+                                                    <AlertTriangle size={14} className="inline mr-2" />
+                                                    [🚨 유동성 경보] {executiveInsight.runwayAlertLabel} 기준 생존 기간(Runway)이 {executiveInsight.runway.toFixed(1)}개월로 추산됩니다. 단기 자금 확보가 최우선입니다.
+                                                </span>
+                                                {executiveInsight.liquidityRunway < executiveInsight.runway && (
+                                                    <span className="block p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl text-amber-500/80 text-[11px] font-bold italic">
+                                                        * 순유동성(미지급금 차감) 반영 시 실질 Runway는 {executiveInsight.liquidityRunway.toFixed(1)}개월로 단축될 수 있습니다.
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
                                     </p>
                                 </div>
                             </section>
@@ -291,7 +382,7 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                                 <h3 className="text-emerald-400 flex items-center gap-2 italic">
                                     <Zap size={18} /> Performance Highlights:
                                 </h3>
-                                <p className="pl-6 border-l-2 border-emerald-500/20 text-slate-400">{executiveInsight?.highlights}</p>
+                                <p className={`pl-6 border-l-2 ${executiveInsight?.status === 'Healthy' ? 'border-emerald-500/20' : 'border-rose-500/20'} text-slate-400`}>{executiveInsight?.highlights}</p>
                             </section>
                         </div>
 

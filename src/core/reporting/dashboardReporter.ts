@@ -10,7 +10,7 @@ export interface DashboardReport {
     grantIncome: number;
     currentCash: number;
     currentNetProfit: number;
-    cashFlowData: { name: string; income: number; operatingIncome: number; grantIncome: number; expense: number }[];
+    cashFlowData: { name: string; income: number; operatingIncome: number; grantIncome: number; expense: number; operatingProfit: number }[];
     collectionRate: number;
 }
 
@@ -29,7 +29,7 @@ export const generateDashboardReport = (ledger: JournalEntry[], currentDate: str
 
 
     // 3. Chart Data (Last 12 months)
-    const cashFlowData: { name: string; income: number; operatingIncome: number; grantIncome: number; expense: number }[] = [];
+    const cashFlowData: { name: string; income: number; operatingIncome: number; grantIncome: number; expense: number; operatingProfit: number }[] = [];
     for (let i = 11; i >= 0; i--) {
         const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
         const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -39,7 +39,7 @@ export const generateDashboardReport = (ledger: JournalEntry[], currentDate: str
         const end = `${mKey}-${String(lastDay).padStart(2, '0')}`;
         
         if (end > currentDate) {
-            cashFlowData.push({ name: `${d.getMonth() + 1}월`, income: 0, operatingIncome: 0, grantIncome: 0, expense: 0 });
+            cashFlowData.push({ name: `${d.getMonth() + 1}월`, income: 0, operatingIncome: 0, grantIncome: 0, expense: 0, operatingProfit: 0 });
             continue;
         }
 
@@ -64,7 +64,8 @@ export const generateDashboardReport = (ledger: JournalEntry[], currentDate: str
             income: mOperatingIncome + mGrantIncome, 
             operatingIncome: mOperatingIncome,
             grantIncome: mGrantIncome,
-            expense: mExpense 
+            expense: mExpense,
+            operatingProfit: mOperatingIncome - mExpense
         });
     }
 

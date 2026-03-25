@@ -1,5 +1,5 @@
 import React, { createContext, useState, useMemo, ReactNode, useEffect, useCallback } from 'react';
-import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction, LedgerLine, TrialBalance, AccountDefinition, MacroAssumptions } from '../types';
+import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction, LedgerLine, TrialBalance, AccountDefinition, MacroAssumptions, AiChatMessage } from '../types';
 import { calculateTrialBalance, calculateFinancialsFromTB, unrollJournalToLedger, generateMultiYearSimulation } from '../core/engine';
 import { CHART_OF_ACCOUNTS } from '../core/coa';
 import { ALL_ACCOUNTS, MASTER_ACCOUNTS } from '../constants/accounts';
@@ -81,6 +81,9 @@ export interface AccountingContextType {
     setFounderInitialOwnership: (val: number) => void;
     investmentAmount: number;
     setInvestmentAmount: (val: number) => void;
+    aiMessages: AiChatMessage[];
+    setAiMessages: (msgs: AiChatMessage[] | ((prev: AiChatMessage[]) => AiChatMessage[])) => void;
+    clearAiMessages: () => void;
 }
 
 export const AccountingContext = createContext<AccountingContextType | undefined>(undefined);
@@ -123,26 +126,107 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                "표준 회계 정책: 모든 지출은 적격증빙을 지향하며, 접대비는 한도를 준수함. 계약서에 명시되지 않은 비용은 집행 전 CFO 승인을 득해야 함.";
     });
 
-    // [V2.6] Session Persistence (SURVIVES TAB NAVIGATION)
-    const [baselineSnapshot, setBaselineSnapshot] = useState<{ date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null>(null);
-    const [scenarioResults, setScenarioResults] = useState<JournalEntry[]>([]);
-    const [baselineEntries, setBaselineEntries] = useState<JournalEntry[]>([]);
-    const [baselineTimestamp, setBaselineTimestamp] = useState<number | null>(null);
+    // [V2.6] Session Persistence (SURVIVES TAB NAVIGATION & REFRESH)
+    const [baselineSnapshot, setBaselineSnapshotState] = useState<{ date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null>(() => {
+        const saved = localStorage.getItem('accounting_baseline_snapshot');
+        return saved ? JSON.parse(saved) : null;
+    });
+    const setBaselineSnapshot = (val: any) => {
+        setBaselineSnapshotState(val);
+        localStorage.setItem('accounting_baseline_snapshot', JSON.stringify(val));
+    };
+
+    const [scenarioResults, setScenarioResultsState] = useState<JournalEntry[]>(() => {
+        const saved = localStorage.getItem('accounting_scenario_results');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const setScenarioResults = (val: JournalEntry[]) => {
+        setScenarioResultsState(val);
+        localStorage.setItem('accounting_scenario_results', JSON.stringify(val));
+    };
+
+    const [baselineEntries, setBaselineEntriesState] = useState<JournalEntry[]>(() => {
+        const saved = localStorage.getItem('accounting_baseline_entries');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const setBaselineEntries = (val: JournalEntry[]) => {
+        setBaselineEntriesState(val);
+        localStorage.setItem('accounting_baseline_entries', JSON.stringify(val));
+    };
+
+    const [baselineTimestamp, setBaselineTimestampState] = useState<number | null>(() => {
+        const saved = localStorage.getItem('accounting_baseline_timestamp');
+        return saved ? parseInt(saved) : null;
+    });
+    const setBaselineTimestamp = (val: number | null) => {
+        setBaselineTimestampState(val);
+        if (val) localStorage.setItem('accounting_baseline_timestamp', val.toString());
+        else localStorage.removeItem('accounting_baseline_timestamp');
+    };
 
     // [V2.6] Strategic Compass Persistence States
-    const [revenueMult, setRevenueMult] = useState(1.0);
-    const [expenseMult, setExpenseMult] = useState(1.0);
-    const [fixedCostDelta, setFixedCostDelta] = useState(0);
-    const [preMoneyValuation, setPreMoneyValuation] = useState(500000000);
-    const [projectionMonths, setProjectionMonths] = useState(36);
-    const [macro, setMacro] = useState<MacroAssumptions>({
-        inflationRate: 0.03,
-        wageGrowthRate: 0.05,
-        otherExpenseGrowth: 0.02,
-        revenueNaturalGrowth: 0.01
+    const [revenueMult, setRevenueMultState] = useState(() => Number(localStorage.getItem('accounting_revenue_mult')) || 1.0);
+    const setRevenueMult = (v: number) => { setRevenueMultState(v); localStorage.setItem('accounting_revenue_mult', v.toString()); };
+
+    const [expenseMult, setExpenseMultState] = useState(() => Number(localStorage.getItem('accounting_expense_mult')) || 1.0);
+    const setExpenseMult = (v: number) => { setExpenseMultState(v); localStorage.setItem('accounting_expense_mult', v.toString()); };
+
+    const [fixedCostDelta, setFixedCostDeltaState] = useState(() => Number(localStorage.getItem('accounting_fixed_delta')) || 0);
+    const setFixedCostDelta = (v: number) => { setFixedCostDeltaState(v); localStorage.setItem('accounting_fixed_delta', v.toString()); };
+
+    const [preMoneyValuation, setPreMoneyValuationState] = useState(() => Number(localStorage.getItem('accounting_pre_money')) || 500000000);
+    const setPreMoneyValuation = (v: number) => { setPreMoneyValuationState(v); localStorage.setItem('accounting_pre_money', v.toString()); };
+
+    const [projectionMonths, setProjectionMonthsState] = useState(() => Number(localStorage.getItem('accounting_projection_months')) || 36);
+    const setProjectionMonths = (v: number) => { setProjectionMonthsState(v); localStorage.setItem('accounting_projection_months', v.toString()); };
+
+    const [macro, setMacroState] = useState<MacroAssumptions>(() => {
+        const saved = localStorage.getItem('accounting_macro');
+        return saved ? JSON.parse(saved) : {
+            inflationRate: 0.03,
+            wageGrowthRate: 0.05,
+            otherExpenseGrowth: 0.02,
+            revenueNaturalGrowth: 0.01
+        };
     });
-    const [founderInitialOwnership, setFounderInitialOwnership] = useState(1.0);
-    const [investmentAmount, setInvestmentAmount] = useState(0);
+    const setMacro = (v: MacroAssumptions) => { setMacroState(v); localStorage.setItem('accounting_macro', JSON.stringify(v)); };
+
+    const [founderInitialOwnership, setFounderInitialOwnershipState] = useState(() => Number(localStorage.getItem('accounting_founder_owner')) || 1.0);
+    const setFounderInitialOwnership = (v: number) => { setFounderInitialOwnershipState(v); localStorage.setItem('accounting_founder_owner', v.toString()); };
+
+    const [investmentAmount, setInvestmentAmountState] = useState(() => Number(localStorage.getItem('accounting_invest_amount')) || 0);
+    const setInvestmentAmount = (v: number) => { setInvestmentAmountState(v); localStorage.setItem('accounting_invest_amount', v.toString()); };
+
+    // [V2.7] AI Chat Persistence
+    const DEFAULT_AI_MSG: AiChatMessage = {
+        role: "bot",
+        content: "반갑습니다. AccountingFlow의 AI CFO 보좌관입니다. 실시간 장부 데이터를 분석하여 경영 의사결정에 필요한 핵심 요약과 리스크 진단을 제공합니다. 궁금하신 경영 지표가 있으신가요?"
+    };
+
+    const [aiMessages, setAiMessagesState] = useState<AiChatMessage[]>(() => {
+        const saved = localStorage.getItem('accounting_ai_messages');
+        if (saved) {
+            try {
+                return JSON.parse(saved);
+            } catch (e) {
+                console.error("Failed to parse saved AI messages:", e);
+                return [DEFAULT_AI_MSG];
+            }
+        }
+        return [DEFAULT_AI_MSG];
+    });
+
+    const setAiMessages = (msgsOrFn: AiChatMessage[] | ((prev: AiChatMessage[]) => AiChatMessage[])) => {
+        setAiMessagesState(prev => {
+            const next = typeof msgsOrFn === 'function' ? msgsOrFn(prev) : msgsOrFn;
+            localStorage.setItem('accounting_ai_messages', JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const clearAiMessages = () => {
+        setAiMessages([DEFAULT_AI_MSG]);
+    };
 
     const [config, setConfig] = useState<TenantConfig>({
         tenantId: 'default-tenant',
@@ -816,7 +900,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             founderInitialOwnership,
             setFounderInitialOwnership,
             investmentAmount,
-            setInvestmentAmount
+            setInvestmentAmount,
+            aiMessages,
+            setAiMessages,
+            clearAiMessages
         }}>
             {children}
 </AccountingContext.Provider>

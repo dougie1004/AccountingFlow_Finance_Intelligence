@@ -20,6 +20,7 @@ import {
     PieChart as RePieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
     BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
+import { motion, AnimatePresence } from 'framer-motion';
 
 import { useAccounting } from '../hooks/useAccounting';
 import { generateRiskReport } from '../core/reporting/riskReporter';
@@ -33,6 +34,8 @@ export const RiskControl: React.FC = () => {
     const report = React.useMemo(() => 
         generateRiskReport(ledger, selectedDate), 
     [ledger, selectedDate]);
+
+    const [activeKpi, setActiveKpi] = React.useState<string | null>(null);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('ko-KR', {
@@ -51,7 +54,7 @@ export const RiskControl: React.FC = () => {
         .filter(f => f.value > 0);
 
     const CLEARING_STATUS = [
-        { name: '정상 미결 (Open)', value: report.tradeSettlementRisk - report.unsettledLongTerm, color: '#3b82f6' },
+        { name: '정상 미결 (Open)', value: report.clearingRisk - report.unsettledLongTerm, color: '#3b82f6' },
         { name: '기한 경과/중단 (High Risk)', value: report.unsettledLongTerm, color: '#ef4444' }
     ];
 
@@ -99,13 +102,13 @@ export const RiskControl: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex flex-col items-end">
-                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Global Close Progress</span>
-                            <span className="text-xl font-black text-white">{report.closeReadiness.matchingRate}%</span>
+                            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Global Close Progress (Matching)</span>
+                            <span className="text-xl font-black text-white">{report.matchingStatus.completed}%</span>
                         </div>
                         <div className="w-32 bg-white/5 h-2 rounded-full overflow-hidden border border-white/5">
                             <div 
                                 className="bg-emerald-500 h-full transition-all duration-1000" 
-                                style={{ width: `${report.closeReadiness.matchingRate}%` }} 
+                                style={{ width: `${report.matchingStatus.completed}%` }} 
                             />
                         </div>
                     </div>
@@ -113,9 +116,9 @@ export const RiskControl: React.FC = () => {
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {[
-                        { label: 'Matching', value: `${report.closeReadiness.matchingRate}% completed`, status: report.closeReadiness.matchingRate === 100 ? 'Completed' : 'In Progress' },
-                        { label: 'Accrual', value: report.closeReadiness.accrualStatus, status: report.closeReadiness.accrualStatus },
-                        { label: 'Amortization', value: report.closeReadiness.amortizationStatus, status: report.closeReadiness.amortizationStatus }
+                        { label: 'Matching (Accuracy)', value: `${report.matchingStatus.accuracy}%`, status: report.matchingStatus.accuracy >= 99 ? 'Completed' : 'In Progress' },
+                        { label: 'Pending Items', value: `${report.matchingStatus.pending}건`, status: report.matchingStatus.pending === 0 ? 'Completed' : 'In Progress' },
+                        { label: 'Amortization', value: report.amortizationStatus, status: report.amortizationStatus }
                     ].map((item, idx) => (
                         <div key={idx} className="bg-black/20 p-6 rounded-2xl border border-white/5 flex items-center justify-between">
                             <div>
@@ -135,21 +138,60 @@ export const RiskControl: React.FC = () => {
             {/* PART 6 & Row 2 — Metric Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {[
-                    { label: 'Blocked Amount', value: formatCurrency(report.blockedAmount), sub: `${report.blockedCount}건의 승인 보류(blocked) 항목`, icon: ShieldAlert, color: 'text-rose-500' },
-                    { label: '90일 초과 미정산', value: formatCurrency(report.unsettledLongTerm), sub: `${report.unsettledLongTermCount}건의 기한 경과 항목`, icon: Clock, color: 'text-amber-500' },
-                    { label: '상계 미결 리스크', value: formatCurrency(report.clearingRisk), sub: 'matchingStatus !== "matched" 항목', icon: BarChart3, color: 'text-blue-500' },
-                    { label: '현금 리스크', value: formatCurrency(report.cashRisk), sub: '3개월 내 예상 부족 현금 규모', icon: Activity, color: 'text-emerald-500' }
+                    { id: 'blockedAmount', label: 'Blocked Amount', value: formatCurrency(report.blockedAmount), sub: `${report.blockedCount}건의 승인 보류(blocked) 항목`, icon: ShieldAlert, color: 'text-rose-500' },
+                    { id: 'unsettledLongTerm', label: '90일 초과 미정산', value: formatCurrency(report.unsettledLongTerm), sub: `${report.unsettledLongTermCount}건의 기한 경과 항목`, icon: Clock, color: 'text-amber-500' },
+                    { id: 'clearingRisk', label: '상계 미결 리스크', value: formatCurrency(report.clearingRisk), sub: 'matchingStatus !== "matched" 항목', icon: BarChart3, color: 'text-blue-500' },
+                    { id: 'cashRisk', label: '현금 리스크', value: formatCurrency(report.cashRisk), sub: '3개월 내 예상 부족 현금 규모', icon: Activity, color: 'text-emerald-500' }
                 ].map((m, idx) => (
-                    <div key={idx} className="bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group">
+                    <motion.div 
+                        key={idx} 
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => setActiveKpi(activeKpi === m.id ? null : m.id)}
+                        className={`bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group cursor-pointer transition-all ${
+                            activeKpi === m.id ? 'ring-2 ring-indigo-500/50 bg-indigo-500/5' : ''
+                        }`}
+                    >
                         <div className="absolute right-[-10%] top-[-10%] opacity-5 group-hover:scale-110 transition-transform">
                             <m.icon size={120} className={m.color} />
                         </div>
-                        <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4">{m.label}</p>
+                        <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex justify-between items-center">
+                            {m.label}
+                            {activeKpi === m.id && <Zap size={12} className="text-indigo-400" />}
+                        </p>
                         <h2 className="text-3xl font-black text-white tracking-tighter italic mb-2">{m.value}</h2>
                         <p className="text-xs font-bold text-slate-500">{m.sub}</p>
-                    </div>
+                    </motion.div>
                 ))}
             </div>
+
+            {/* AI Basis Panel (Rationale) */}
+            <AnimatePresence>
+                {activeKpi && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: -20, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: 'auto' }}
+                        exit={{ opacity: 0, y: -20, height: 0 }}
+                        className="bg-indigo-600/10 border border-indigo-500/30 rounded-[2.5rem] p-8 overflow-hidden shadow-xl"
+                    >
+                        <div className="flex items-start gap-6">
+                            <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-lg shadow-indigo-600/20">
+                                <BrainCircuit size={28} />
+                            </div>
+                            <div className="flex-1">
+                                <h4 className="text-lg font-black text-white italic mb-2 tracking-tight">AI 계산 근거 및 통제 규칙 <span className="text-indigo-400 opacity-60 not-italic ml-2">(Logic Rationale)</span></h4>
+                                <p className="text-slate-300 leading-relaxed font-bold text-sm">
+                                    {report.logicRationale[activeKpi] || "부합하는 계산 근거를 찾을 수 없습니다."}
+                                </p>
+                                <div className="mt-4 flex gap-4">
+                                    <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-[9px] font-black text-slate-500 uppercase tracking-widest">Dataset: ACTUAL</div>
+                                    <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-[9px] font-black text-slate-500 uppercase tracking-widest">Dimension: {selectedDate}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Row 3 — Intelligence Findings */}
             <div className="bg-[#151D2E] rounded-[3rem] border border-white/5 overflow-hidden shadow-2xl">

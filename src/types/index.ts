@@ -54,6 +54,10 @@ export interface JournalEntry {
 
     // [Step 3] Simulation & Scenario
     scope?: 'actual' | 'scenario' | 'future';
+    
+    // [CFO Risk v5] Matching & Aging
+    accountType?: 'AR' | 'AP' | 'Other';
+    referenceId?: string; // Original invoice ID for payments
 
     // [Edge Case] Multi-line (Complex) Entry
     complexLines?: { account: string; accountId?: string; debit: number; credit: number }[];
@@ -69,7 +73,9 @@ export interface LedgerLine {
     credit: number;
     type: EntryType;
     scope: 'actual' | 'scenario' | 'future';
-    vendor?: string; // [NEW] 거래처 정보 (거래처 원장용)
+    vendor?: string; 
+    accountType?: 'AR' | 'AP' | 'Other';
+    referenceId?: string;
 }
 
 export type TaxCode =
@@ -500,4 +506,10 @@ export interface MacroAssumptions {
     wageGrowthRate: number;     // e.g. 0.05 for 5%
     otherExpenseGrowth: number;
     revenueNaturalGrowth: number; // Organic growth without strategy
+}
+
+export interface AiChatMessage {
+    role: "bot" | "user";
+    content: string;
+    type?: "standard" | "management" | "search";
 }

@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react';
+import { useState, useContext, useEffect } from 'react';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import BrandHeader from './components/layout/BrandHeader';
@@ -34,9 +34,15 @@ import CloseReadiness from './pages/CloseReadiness';
 import { AccountingProvider, AccountingContext } from './context/AccountingContext';
 import { ConfigProvider } from './context/ConfigContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { testConnection } from './lib/supabaseClient';
 
 const AppContent = () => {
     const { activeTab, setTab } = useContext(AccountingContext)!;
+
+    useEffect(() => {
+        // [Supabase] Test Real-time Connectivity
+        testConnection();
+    }, []);
 
     return (
         <div className="flex h-screen font-sans antialiased overflow-hidden" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-high)' }}>

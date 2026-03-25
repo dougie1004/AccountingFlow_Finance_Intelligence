@@ -120,27 +120,23 @@ export const MetricRegistry = {
             monthlyDeltas.set(month, (monthlyDeltas.get(month) || 0) + delta);
         });
 
-        const sortedMonths = Array.from(monthlyDeltas.keys()).sort();
-        let runningLiquidity = liquidity;
-        let exhaustionMonth = -1;
+        const deltas = Array.from(monthlyDeltas.values());
+        const burnMonths = deltas.filter(d => d < 0);
+        const avgBurn = burnMonths.length > 0 
+            ? burnMonths.reduce((sum, val) => sum + Math.abs(val), 0) / burnMonths.length
+            : 0;
 
-        for (let i = 0; i < sortedMonths.length; i++) {
-            runningLiquidity += (monthlyDeltas.get(sortedMonths[i]) || 0);
-            if (runningLiquidity <= 0) {
-                exhaustionMonth = i + 1;
-                break;
-            }
-        }
+        const runway = avgBurn > 0 ? (liquidity / avgBurn) : 24.1;
+        const exhaustionMonth = Math.round(runway * 10) / 10;
 
         return {
-            value: exhaustionMonth === -1 ? 24.1 : exhaustionMonth,
-            isInfinite: exhaustionMonth === -1,
-            label: exhaustionMonth === -1 ? "24.0+ 개월" : `${exhaustionMonth}개월`,
-            inputs: { '현재 유동성': liquidity },
-            formula: '누적 현금 흐름 (시나리오 필터링)',
+            value: exhaustionMonth,
+            isInfinite: exhaustionMonth >= 24,
+            label: exhaustionMonth >= 24 ? "24.0+ 개월" : `${exhaustionMonth.toFixed(1)}개월`,
+            inputs: { '현재 유동성': liquidity, '평균 예상 소모액': avgBurn },
+            formula: '예상 소모액 기반 선형 런웨이 (Linear Projection)',
             period: '미래 지표 분석',
-            dataSource: 'scenario',
-            monthlyDeltas: sortedMonths.map(m => ({ date: m, cashDelta: monthlyDeltas.get(m) || 0 }))
+            dataSource: 'scenario'
         };
     },
 

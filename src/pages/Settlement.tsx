@@ -120,59 +120,91 @@ export const Settlement: React.FC = () => {
             { name: '360일 이상', value: 0, color: '#ef4444' }
         ];
 
-        const today = new Date(selectedDate);
-        const prevMonth = new Date(today);
-        prevMonth.setMonth(today.getMonth() - 1);
+        const getNow = (dateString: string | undefined) => {
+            if (dateString) {
+                const date = new Date(dateString);
+                date.setHours(23, 59, 59, 999); // Set to end of day for consistency
+                return date;
+            }
+            return new Date();
+        };
+
+        const systemNow = new Date();
+        const analysisNow = getNow(selectedDate);
+        const useSimulation = selectedDate !== undefined && selectedDate !== '';
+        
+        const riskNow = useSimulation ? analysisNow : systemNow;
+        const prevMonth = new Date(riskNow);
+        prevMonth.setMonth(riskNow.getMonth() - 1);
+        
+        const riskLedgerUsed = useSimulation ? currentEntries : currentEntries.filter(e => {
+            const isScen = e.scope === 'scenario' || e.scope === 'future' || e.id?.includes('SIM-') || e.id?.startsWith('REV-');
+            return !isScen;
+        });
 
         let prevTotal = 0;
         const vendorsWithOverdue = new Set<string>();
 
-        currentEntries.forEach(e => {
-            const entryDate = new Date(e.date);
-            if (entryDate > today) return;
-
-            let isIncrease = false;
-            let isDecrease = false;
-
-            if (viewMode === 'RECEIVABLES') {
-                isIncrease = e.debitAccount.includes('외상매출');
-                isDecrease = e.creditAccount.includes('외상매출');
-            } else if (viewMode === 'PAYABLES') {
-                isIncrease = e.creditAccount.includes('외상매입') || e.creditAccount.includes('미지급');
-                isDecrease = e.debitAccount.includes('외상매입') || e.debitAccount.includes('미지급');
-            } else {
-                // Suspense logic: Debit for Assets (선급), Credit for Liabs (선수/가수)
-                const isAssetLike = e.debitAccount.includes('선급') || e.debitAccount.includes('가지급');
-                const isLiabLike = e.creditAccount.includes('선수') || e.creditAccount.includes('가수');
-                isIncrease = isAssetLike || isLiabLike;
-                isDecrease = !isIncrease;
-            }
+        // 🔥 STEP 1: 리스크 = ABS(월 단위 + 기호 보정 잔액) - SSOT v7 (Accounting-Sign Corrected)
+        const balanceMap: Record<string, number> = {};
+        riskLedgerUsed.forEach(e => {
+            if (new Date(e.date) > riskNow) return;
+            const monthKey = e.date.slice(0, 7); 
+            const key = `${e.referenceId || e.vendor || 'global'}_${monthKey}`;
             
-            if (isIncrease) {
-                total += e.amount;
+            let change = 0;
+            const isDeAR = e.debitAccount.includes('외상매출');
+            const isCrAR = e.creditAccount.includes('외상매출');
+            const isCrAP = e.creditAccount.includes('미지급') || e.creditAccount.includes('외상매입');
+            const isDeAP = e.debitAccount.includes('미지급') || e.debitAccount.includes('외상매입');
+
+            if (e.accountType === 'AR') {
+                change = (isDeAR ? e.amount : 0) - (isCrAR ? e.amount : 0);
+            } else if (e.accountType === 'AP') {
+                change = (isCrAP ? e.amount : 0) - (isDeAP ? e.amount : 0);
+            } else {
+                return; // Risk only for AR/AP
+            }
+
+            balanceMap[key] = (balanceMap[key] || 0) + change;
+        });
+
+        const totalAmount = Object.values(balanceMap).reduce((sum, bal) => sum + Math.abs(bal), 0);
+        total = totalAmount;
+
+        riskLedgerUsed.forEach(e => {
+            const entryDate = new Date(e.date);
+            if (entryDate > riskNow) return;
+
+            // Only count currently unmatched in the count KPI
+            if (e.matchingStatus !== 'matched') {
                 count++;
+                const amt = Math.abs(e.amount);
                 
-                const diffDays = Math.floor((today.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
-                
-                if (diffDays <= 30) agingData[0].value += e.amount;
-                else if (diffDays <= 60) agingData[1].value += e.amount;
-                else if (diffDays <= 90) agingData[2].value += e.amount;
-                else if (diffDays <= 180) agingData[3].value += e.amount;
-                else if (diffDays <= 270) agingData[4].value += e.amount;
-                else if (diffDays <= 360) agingData[5].value += e.amount;
-                else agingData[6].value += e.amount;
+                const diffDays = Math.floor((riskNow.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+
+                if (diffDays <= 30) agingData[0].value += amt;
+                else if (diffDays <= 60) agingData[1].value += amt;
+                else if (diffDays <= 90) agingData[2].value += amt;
+                else if (diffDays <= 180) agingData[3].value += amt;
+                else if (diffDays <= 270) agingData[4].value += amt;
+                else if (diffDays <= 360) agingData[5].value += amt;
+                else agingData[6].value += amt;
 
                 if (diffDays > 30) {
                     overdueCount++;
                     if (e.vendor) vendorsWithOverdue.add(e.vendor);
                 }
-
-                if (entryDate <= prevMonth) prevTotal += e.amount;
-            } else if (isDecrease) {
-                total -= e.amount;
-                if (entryDate <= prevMonth) prevTotal -= e.amount;
             }
+
+            if (entryDate <= prevMonth) prevTotal += e.amount;
         });
+
+        console.log("=== SETTLEMENT SSOT DEBUG ===");
+        console.log("total exposure (riskAmount):", total);
+        console.log("total entries in list:", currentEntries.length);
+        console.log("risk ledger used size:", riskLedgerUsed.length);
+        console.log("unmatched risk total:", total);
 
         const trend = prevTotal === 0 ? 0 : ((total - prevTotal) / prevTotal) * 100;
 
@@ -219,7 +251,7 @@ export const Settlement: React.FC = () => {
                     </div>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Total Risk Exposure</p>
                     <h2 className="text-4xl font-black text-white tracking-tighter mb-2">
-                        ₩{(viewMetrics.total / 10000).toLocaleString()}<span className="text-lg text-slate-500 ml-1">만원</span>
+                        ₩{Math.floor(viewMetrics.total / 10000).toLocaleString()}<span className="text-lg text-slate-500 ml-1">만원</span>
                     </h2>
                     <div className={`flex items-center gap-2 text-xs font-bold ${viewMetrics.trend >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                         {viewMetrics.trend >= 0 ? <TrendingUp size={14} /> : <ArrowDownLeft size={14} />} 

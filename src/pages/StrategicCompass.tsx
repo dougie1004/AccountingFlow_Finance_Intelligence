@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend, Tooltip,
-    ResponsiveContainer, PieChart as RePieChart, Pie, Cell, ReferenceLine, ReferenceDot, ReferenceArea, Line
+    ResponsiveContainer, PieChart as RePieChart, Pie, Cell, ReferenceLine, ReferenceDot, ReferenceArea, Line, Label
 } from 'recharts';
 import { invoke } from '@tauri-apps/api/core';
 import { JournalEntry, ScenarioDefinition, MacroAssumptions } from '../types';
@@ -54,26 +54,42 @@ const CustomChartTooltip = ({ active, payload, label, stats }: any) => {
         const sortedPayload = [...payload].sort((a, b) => getWeight(a.name) - getWeight(b.name));
 
         const cashItems = sortedPayload.filter(p => p.name.includes('현금'));
-        const profitItems = sortedPayload.filter(p => p.name.includes('손익'));
+        const profitItems = sortedPayload.filter(p => p.name.includes('이익') || p.name.includes('손익'));
 
         const formatValue = (v: number) => new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 }).format(v);
 
+        const scenarioProfit = data.ScenarioNetIncome ?? 0;
+        const scenarioCash = data.ScenarioCash ?? 0;
+        const isGenerating = scenarioProfit > 0;
+        const absBurn = Math.abs(scenarioProfit);
+        const monthsLeft = isGenerating ? Infinity : (absBurn > 0 ? scenarioCash / absBurn : Infinity);
+
         return (
-            <div className="bg-[#0B1221] border border-white/5 p-5 rounded-[2rem] shadow-3xl min-w-[280px] backdrop-blur-xl">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 border-b border-white/5 pb-2">{label}</p>
+            <div className="bg-[#0B1221] border border-white/5 p-6 rounded-[2.5rem] shadow-4xl min-w-[320px] backdrop-blur-2xl">
+                <div className="flex justify-between items-center mb-5 border-b border-white/5 pb-3">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">{label}</p>
+                    <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${isGenerating ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {isGenerating ? '💸 Generating' : '🔥 Burning'}
+                    </div>
+                </div>
 
                 {/* 💰 CASH FLOW GROUP */}
-                <div className="space-y-2.5 mb-5">
+                <div className="space-y-2.5 mb-6">
                     <p className="text-[9px] font-black text-emerald-400/60 uppercase tracking-widest flex items-center gap-1.5 px-1">
-                        <Database size={10} /> Cash Flow (현금 흐름)
+                        <Database size={10} /> 현금 잔액 (Total Cumulative Cash)
                     </p>
                     {cashItems.map((entry: any, index: number) => (
-                        <div key={`cash-${index}`} className="flex justify-between items-center gap-4 bg-white/5 px-3 py-2 rounded-xl border border-white/5">
+                        <div key={`cash-${index}`} className="flex justify-between items-center gap-4 bg-white/5 px-4 py-3 rounded-2xl border border-white/5">
                             <div className="flex items-center gap-2">
                                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
                                 <span className="text-[10px] font-bold text-slate-300">{entry.name}</span>
                             </div>
-                            <span className="text-[11px] font-black text-white">{formatValue(entry.value)}</span>
+                            <div className="text-right">
+                                <p className="text-[11px] font-black text-white">{formatValue(entry.value)}</p>
+                                {!isGenerating && entry.name.includes('시나리오') && (
+                                    <p className="text-[8px] font-bold text-rose-400/60 mt-0.5">Est. {monthsLeft > 24 ? '24+' : monthsLeft.toFixed(1)}m left</p>
+                                )}
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -81,10 +97,10 @@ const CustomChartTooltip = ({ active, payload, label, stats }: any) => {
                 {/* 📈 P&L GROUP */}
                 <div className="space-y-2.5">
                     <p className="text-[9px] font-black text-blue-400/60 uppercase tracking-widest flex items-center gap-1.5 px-1">
-                        <Activity size={10} /> Profit & Loss (월간 손익)
+                        <Activity size={10} /> 월간 손익 (Monthly Cash Flow)
                     </p>
                     {profitItems.map((entry: any, index: number) => (
-                        <div key={`pnl-${index}`} className="flex justify-between items-center gap-4 bg-white/5 px-3 py-2 rounded-xl border border-white/5">
+                        <div key={`pnl-${index}`} className="flex justify-between items-center gap-4 bg-white/5 px-4 py-3 rounded-2xl border border-white/5">
                             <div className="flex items-center gap-2">
                                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
                                 <span className="text-[10px] font-bold text-slate-300">{entry.name}</span>
@@ -95,17 +111,15 @@ const CustomChartTooltip = ({ active, payload, label, stats }: any) => {
                 </div>
 
                 {isBEP && (
-                    <div className="mt-5 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-[1.5rem]">
-                        <p className="text-emerald-400 text-[10px] font-black uppercase tracking-tighter flex items-center gap-1">
-                            <Zap size={10} /> Break-even Point 흑자 달성
-                        </p>
+                    <div className="mt-6 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-[1.5rem] flex items-center gap-3">
+                        <Zap size={14} className="text-emerald-400" />
+                        <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest italic">Break-even Point 달성</p>
                     </div>
                 )}
                 {isCashOut && (
-                    <div className="mt-5 p-4 bg-rose-500/10 border border-rose-500/20 rounded-[1.5rem]">
-                        <p className="text-rose-400 text-[10px] font-black uppercase tracking-tighter flex items-center gap-1">
-                            <AlertCircle size={10} /> Cash Out 고갈 임계점
-                        </p>
+                    <div className="mt-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-[1.5rem] flex items-center gap-3 animate-pulse">
+                        <AlertCircle size={14} className="text-rose-400" />
+                        <p className="text-rose-400 text-[10px] font-black uppercase tracking-widest italic">Cash Out 고갈 임계점</p>
                     </div>
                 )}
             </div>
@@ -265,17 +279,19 @@ const StrategicCompass: React.FC = () => {
 
     const [savedStrategies, setSavedStrategies] = useState<any[]>([]);
 
-    // [V2.6] Deterministic Equity Control Report (Manual Selection)
+    // [V2.6] Deterministic Equity Control Report
     const report = useMemo(() => {
-        const result = analyzeEquityControl(preMoneyValuation || 5000000000, investmentAmount);
+        // Use preMoneyValuation directly, defaulting to 1B if not set
+        const result = analyzeEquityControl(preMoneyValuation || 1000000000, investmentAmount);
         return {
             ...result,
-            founderRatio: result.founderRatio, // Already %, but let's be explicit
+            founderRatio: result.founderRatio,
             dilutionRatio: result.dilutionRatio,
             controlState: result.controlState,
             warnings: result.warnings
         } as any;
     }, [preMoneyValuation, investmentAmount]);
+
 
 
     const handleExportAll = async () => {
@@ -620,10 +636,11 @@ const StrategicCompass: React.FC = () => {
                 fullMonth: cf.date,
                 BaselineCash: (baseCF?.cash ?? 0) + offset,
                 ScenarioCash: cf.cash + offset,
-                ScenarioProfit: scenario?.netIncome ?? 0,
+                ScenarioProfit: scenario?.operatingProfit ?? 0, // [V2.6] Operating Core BEP focus
+                ScenarioNetIncome: scenario?.netIncome ?? 0,   // [V2.6] Total cash recovery focus
                 // Only show actual profit for historical period
-                ActualProfit: index <= nowIndex ? (actual?.netIncome ?? 0) : 0,
-                BaselineProfit: baseline?.netIncome ?? 0,
+                ActualProfit: index <= nowIndex ? (actual?.operatingProfit ?? 0) : 0,
+                BaselineProfit: baseline?.operatingProfit ?? 0,
                 isFuture,
                 isNow,
                 index
@@ -786,7 +803,12 @@ const StrategicCompass: React.FC = () => {
             projectionResult,
             cashOutDateLabel: cashOutMonth !== null && chartData[cashOutMonth] ? chartData[cashOutMonth].month : "N/A",
             deathValleyExpl: deathValleyMessage,
-            survivalExpl: survivalProbResult.label || "회계 헌법 2.6조에 따른 결정론적 생존 분석 결과",
+            survivalExpl: `현금 생존 기간(Runway) 기준 판정:
+• 95% (안정): Runway 18개월 초과 (투자 유치 직후 등)
+• 85% (양호): Runway 12개월 ~ 18개월
+• 50% (경계): Runway 6개월 ~ 12개월 (현재 ${runwayMonths.toFixed(1)}개월로 이 구간 해당) - '데스밸리 진입' 단계. 통계적으로 추가 투자 유치나 수익 전환이 일어나지 않으면 생존을 장담할 수 없는 반반의 확률로 봅니다.
+• 25% (위험): Runway 3개월 ~ 6개월
+• 10% (부도 위기): Runway 3개월 미만`,
             insight,
             monthlyBurn: currentBurn,
             burnMultiple: burnMultipleResult.value,
@@ -939,6 +961,14 @@ const StrategicCompass: React.FC = () => {
         };
     }, [stats, preMoneyValuation, scenarioCashFlow, nowIndex, report.controlState, chartData]);
 
+    // 🔥 [V2.6 FIX] Sync Simulation Result to Manual Simulator
+    useEffect(() => {
+        if (equityAnalysis?.fundingNeeded && investmentAmount === 0) {
+            console.log("[Equity] Syncing suggested funding to simulator:", equityAnalysis.fundingNeeded);
+            setInvestmentAmount(equityAnalysis.fundingNeeded);
+        }
+    }, [equityAnalysis?.fundingNeeded, setInvestmentAmount]);
+
     const dilutionAnalysis = useMemo(() => {
         const requiredFundingVal = equityAnalysis?.fundingNeeded;
         if (!requiredFundingVal || requiredFundingVal <= 0) return null;
@@ -1007,8 +1037,23 @@ const StrategicCompass: React.FC = () => {
         }
 
         if (!found) return null;
-        return `${found.fullMonth} 예측`;
+        return `${found.fullMonth}`;
     }, [chartData]);
+
+    const cumulativeBreakEvenMonth = useMemo(() => {
+        let runningSum = 0;
+        let found = null;
+        for (let i = 0; i < chartData.length; i++) {
+            // [V2.6] Cumulative Payback includes all income (grants, etc.)
+            runningSum += chartData[i].ScenarioNetIncome || chartData[i].ActualProfit; 
+            if (runningSum >= 0 && i > nowIndex) {
+                 found = chartData[i];
+                 break;
+            }
+        }
+        if (!found) return null;
+        return `${found.fullMonth}`;
+    }, [chartData, nowIndex]);
 
     return (
         <div className="flex-1 bg-[#07090F] min-h-screen text-slate-100 p-8 lg:p-12 animate-in fade-in duration-700">
@@ -1157,17 +1202,30 @@ const StrategicCompass: React.FC = () => {
                         formatValue={(v) => stats?.projectionResult?.label || "UNKNOWN"}
                     />
                     <ExplainableKPI
-                        label="BEP 도달 (Month)"
+                        label="월간 흑자 전환 (Monthly BEP)"
                         result={{
                             value: stats?.breakEvenMonth || 0,
                             inputs: { '분석 대상 개월수': projectionMonths, '현재 월 순이익': stats?.actualNetProfit.value || 0 },
-                            formula: '시나리오 수익이 처음으로 0보다 커지는 시점 탐색',
+                            formula: '시나리오 월간 수익이 처음으로 0보다 커지는 시점 탐색',
                             period: '전체 분석 시계',
                             dataSource: 'scenario'
                         }}
-                        description="시나리오 수익이 최초로 흑자 전환되는 시점입니다."
+                        description="월간 수익(Revenue)이 운영 비용(OPEX)을 처음으로 넘어서는 시점입니다. 이 시점부터 외부 자금 수혈 없이 자립이 가능해집니다."
                         color="text-indigo-400"
-                        formatValue={(v) => v === 0 ? "N/A" : `${v}개월`}
+                        formatValue={(v) => breakEvenMonth || "N/A"}
+                    />
+                    <ExplainableKPI
+                        label="누적 투자 회수 (Cumulative BEP)"
+                        result={{
+                            value: 0,
+                            inputs: { '분석 기간': projectionMonths },
+                            formula: 'Σ(과거 실적 + 미래 예측) >= 0이 되는 시점',
+                            period: 'Life-to-Date',
+                            dataSource: 'scenario'
+                        }}
+                        description="창업 이후 발생한 모든 누적 손실을 만회하고 법인이 실질적인 순자산 증가 구간에 진입하는 시점입니다. (v2.6 신설)"
+                        color="text-purple-400"
+                        formatValue={(v) => cumulativeBreakEvenMonth || "N/A"}
                     />
                     <ExplainableKPI
                         label="데스밸리 리스크 (Debt Valley)"
@@ -1443,16 +1501,16 @@ const StrategicCompass: React.FC = () => {
                                             iconType="circle"
                                             itemSorter={(item: any) => {
                                                 const order: Record<string, number> = {
-                                                    '실제 월 손익': 1,
-                                                    '베이스라인 월 손익': 2,
-                                                    '시나리오 월 손익': 3,
+                                                    '실제 영업이익': 1,
+                                                    '베이스라인 영업이익': 2,
+                                                    '시나리오 영업이익': 3,
                                                     '베이스라인 현금 (Macro)': 4,
                                                     '시나리오 현금 (Strategy)': 5
                                                 };
                                                 return order[item.value] || 99;
                                             }}
                                             formatter={(value: string) => {
-                                                const isProfit = value.includes('손익');
+                                                const isProfit = value.includes('영업이익');
                                                 const icon = isProfit ? '📈' : '💰';
                                                 const colorClass = isProfit ? 'text-blue-400/90' : 'text-emerald-400/90';
                                                 return (
@@ -1543,7 +1601,7 @@ const StrategicCompass: React.FC = () => {
                                             yAxisId="pnl"
                                             type="monotone"
                                             dataKey="ActualProfit"
-                                            name="실제 월 손익"
+                                            name="실제 영업이익"
                                             stroke="#ffffff88"
                                             strokeWidth={3}
                                             dot={false}
@@ -1583,7 +1641,7 @@ const StrategicCompass: React.FC = () => {
                                             yAxisId="pnl"
                                             type="monotone"
                                             dataKey="BaselineProfit"
-                                            name="베이스라인 월 손익"
+                                            name="베이스라인 영업이익"
                                             stroke="#3b82f666"
                                             strokeWidth={2}
                                             strokeDasharray="4 4"
@@ -1594,7 +1652,7 @@ const StrategicCompass: React.FC = () => {
                                             yAxisId="pnl"
                                             type="monotone"
                                             dataKey="ScenarioProfit"
-                                            name="시나리오 월 손익"
+                                            name="시나리오 영업이익"
                                             stroke="#3b82f6"
                                             strokeWidth={3}
                                             dot={false}
@@ -1822,7 +1880,7 @@ const StrategicCompass: React.FC = () => {
                                         <h4 className="text-4xl font-black italic tracking-tighter uppercase mb-2">
                                             CONTROL STATE: {CONTROL_LABEL[report.controlState]}
                                         </h4>
-                                        <p className="text-xl font-bold opacity-80 italic">창업자 최종 지분율: {report.founderRatio.toFixed(1)}% (시뮬레이션 결과)</p>
+                                        <p className="text-xl font-bold opacity-80 italic">창업자 최종 지분율: {report.founderRatio.toFixed(1)}% (시뮬레이션 설정 결과)</p>
                                     </div>
 
                                     <div className="pt-6 border-t border-white/5 flex flex-wrap gap-12">
