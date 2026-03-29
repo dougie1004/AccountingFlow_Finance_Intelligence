@@ -29,8 +29,6 @@ export const RiskControl: React.FC = () => {
     const { ledger, selectedDate, financials } = useAccounting();
     
     // PART 1 — Verify Ledger Connection
-    console.log("journal entries", ledger.length);
-
     const report = React.useMemo(() => 
         generateRiskReport(ledger, selectedDate), 
     [ledger, selectedDate]);
@@ -54,8 +52,8 @@ export const RiskControl: React.FC = () => {
         .filter(f => f.value > 0);
 
     const CLEARING_STATUS = [
-        { name: '정상 미결 (Open)', value: report.clearingRisk - report.unsettledLongTerm, color: '#3b82f6' },
-        { name: '기한 경과/중단 (High Risk)', value: report.unsettledLongTerm, color: '#ef4444' }
+        { name: '정상 미결 (Open)', value: report.unsettledNet - report.overdueAP.amount, color: '#3b82f6' },
+        { name: '기한 경과 (High Risk)', value: report.overdueAP.amount, color: '#ef4444' }
     ];
 
     return (
@@ -69,11 +67,16 @@ export const RiskControl: React.FC = () => {
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs font-black text-rose-400 uppercase tracking-[0.2em]">Unified Settlement Risk & Financial Integrity Dashboard</span>
+                                <span className="text-[10px] font-black text-rose-400 uppercase tracking-[0.2em]">Unified Settlement Risk & Financial Integrity Dashboard</span>
                             </div>
-                            <h1 className="text-4xl font-black text-white tracking-tighter italic">
-                                결산 및 자금 통제 <span className="text-slate-500 text-xl font-bold not-italic ml-2">(Risk Control)</span>
-                            </h1>
+                            <div className="flex items-center gap-3">
+                                <h1 className="text-4xl font-black text-white tracking-tighter italic">
+                                    결산 및 자금 통제 <span className="text-slate-500 text-xl font-bold not-italic ml-2">(Risk Control)</span>
+                                </h1>
+                                <div className="px-5 py-1.5 bg-blue-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20">
+                                    ACCRUAL VIEW → 손익(P&L) 기반 분석
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -91,7 +94,7 @@ export const RiskControl: React.FC = () => {
                 </div>
             </header>
 
-            {/* PART 5 — Add Close Readiness Panel (Row 1) */}
+            {/* PART 5 — Close Readiness Panel */}
             <section className="bg-gradient-to-br from-[#1E293B] to-[#0F172A] p-8 rounded-[3rem] border border-white/10 shadow-2xl">
                 <div className="flex items-center justify-between mb-8">
                     <div className="flex items-center gap-3">
@@ -135,32 +138,43 @@ export const RiskControl: React.FC = () => {
                 </div>
             </section>
 
-            {/* PART 6 & Row 2 — Metric Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Row 2 — Metric Grid (Split AR/AP & Dual-Insight) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 {[
-                    { id: 'blockedAmount', label: 'Blocked Amount', value: formatCurrency(report.blockedAmount), sub: `${report.blockedCount}건의 승인 보류(blocked) 항목`, icon: ShieldAlert, color: 'text-rose-500' },
-                    { id: 'unsettledLongTerm', label: '90일 초과 미정산', value: formatCurrency(report.unsettledLongTerm), sub: `${report.unsettledLongTermCount}건의 기한 경과 항목`, icon: Clock, color: 'text-amber-500' },
-                    { id: 'clearingRisk', label: '상계 미결 리스크', value: formatCurrency(report.clearingRisk), sub: 'matchingStatus !== "matched" 항목', icon: BarChart3, color: 'text-blue-500' },
-                    { id: 'cashRisk', label: '현금 리스크', value: formatCurrency(report.cashRisk), sub: '3개월 내 예상 부족 현금 규모', icon: Activity, color: 'text-emerald-500' }
+                    { id: 'blockedAmount', label: 'Blocked Amount', value: formatCurrency(report.blockedAmount), sub: `${report.blockedCount}건의 승인 보류`, icon: ShieldAlert, color: 'text-rose-500' },
+                    { id: 'overdueAR', label: '30일 초과 미회수(AR)', value: formatCurrency(report.overdueAR.amount), sub: `${report.overdueAR.count}건의 기한 경과`, icon: Clock, color: 'text-amber-500' },
+                    { id: 'overdueAP', label: '30일 초과 미지급(AP)', value: formatCurrency(report.overdueAP.amount), sub: `${report.overdueAP.count}건의 기한 경과`, icon: Clock, color: 'text-rose-400' },
+                    { id: 'clearingRisk', label: '미결제 리스크', value: formatCurrency(report.unsettledNet), sub: `장부상 순잔액 (Net) vs 미매칭 합계 (Gross) ₩${formatCurrency(report.unsettledGross)}`, icon: BarChart3, color: 'text-blue-500' },
+                    { id: 'cashRisk', label: '현금 리스크', value: formatCurrency(report.cashRisk), sub: '월간 소진액 대비 3개월 부족분', icon: Activity, color: 'text-emerald-500' }
                 ].map((m, idx) => (
                     <motion.div 
                         key={idx} 
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={() => setActiveKpi(activeKpi === m.id ? null : m.id)}
-                        className={`bg-[#151D2E] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group cursor-pointer transition-all ${
+                        className={`bg-[#151D2E] p-6 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group cursor-pointer transition-all ${
                             activeKpi === m.id ? 'ring-2 ring-indigo-500/50 bg-indigo-500/5' : ''
                         }`}
                     >
                         <div className="absolute right-[-10%] top-[-10%] opacity-5 group-hover:scale-110 transition-transform">
-                            <m.icon size={120} className={m.color} />
+                            <m.icon size={80} className={m.color} />
                         </div>
-                        <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-4 flex justify-between items-center">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3 flex justify-between items-center">
                             {m.label}
-                            {activeKpi === m.id && <Zap size={12} className="text-indigo-400" />}
+                            {activeKpi === m.id && <Zap size={10} className="text-indigo-400" />}
                         </p>
-                        <h2 className="text-3xl font-black text-white tracking-tighter italic mb-2">{m.value}</h2>
-                        <p className="text-xs font-bold text-slate-500">{m.sub}</p>
+                        <h2 className="text-2xl font-black text-white tracking-tighter italic mb-2">{m.value}</h2>
+                        <p className="text-[10px] font-bold text-slate-500">{m.sub}</p>
+                        
+                        {(m.id === 'clearingRisk' || m.id === 'overdueAR' || m.id === 'overdueAP') && (
+                            <div className="mt-4 p-4 bg-white/5 border border-white/10 rounded-2xl flex flex-col gap-1">
+                                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">📢 Data Integrity Notice</span>
+                                <p className="text-[10px] font-bold text-slate-400">
+                                    재무제표 기준(Net Balance)은 실제 장부와 일치하며, 정산 기준(Gross Exposure)은 미매칭을 포함합니다.
+                                </p>
+                                <p className="text-[10px] font-bold text-slate-500 italic">"재무제표 기준(Net) vs 정산 기준(Gross) 차이 존재 가능"</p>
+                            </div>
+                        )}
                     </motion.div>
                 ))}
             </div>
@@ -180,8 +194,10 @@ export const RiskControl: React.FC = () => {
                             </div>
                             <div className="flex-1">
                                 <h4 className="text-lg font-black text-white italic mb-2 tracking-tight">AI 계산 근거 및 통제 규칙 <span className="text-indigo-400 opacity-60 not-italic ml-2">(Logic Rationale)</span></h4>
-                                <p className="text-slate-300 leading-relaxed font-bold text-sm">
-                                    {report.logicRationale[activeKpi] || "부합하는 계산 근거를 찾을 수 없습니다."}
+                                <p className="text-slate-300 leading-relaxed font-black text-sm">
+                                    {activeKpi === 'overdueAR' && `전표일 기준 30일 이상 미회수된 실제 매출채권(AR) 항목입니다. (BS 잔액 기준 상계 완료)`}
+                                    {activeKpi === 'overdueAP' && `전표일 기준 30일 이상 지연된 영업 미지급금(AP) 항목입니다. (BS 잔액 기준 상계 완료)`}
+                                    {activeKpi !== 'overdueAR' && activeKpi !== 'overdueAP' && (report.logicRationale[activeKpi] || "부합하는 계산 근거를 찾을 수 없습니다.")}
                                 </p>
                                 <div className="mt-4 flex gap-4">
                                     <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-[9px] font-black text-slate-500 uppercase tracking-widest">Dataset: ACTUAL</div>
@@ -200,30 +216,30 @@ export const RiskControl: React.FC = () => {
                     <h3 className="text-lg font-black text-white italic">인텔리전스 경영 통찰 <span className="text-slate-500 not-italic">(Intelligence Findings)</span></h3>
                 </div>
                 <div className="p-8">
-                    {report.unsettledLongTerm > 0 || report.blockedAmount > 0 || report.cashRisk > 0 ? (
+                    {report.overdueAR.amount > 0 || report.overdueAP.amount > 0 || report.cashRisk > 0 ? (
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {report.unsettledLongTerm > 0 && (
+                            {report.overdueAR.amount > 0 && (
                                 <div className="flex items-start gap-4 p-6 bg-amber-500/5 border border-amber-500/20 rounded-3xl">
                                     <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-500">
-                                        <Clock size={20} />
+                                        <TrendingUp size={20} />
                                     </div>
                                     <div>
-                                        <h4 className="text-sm font-black text-amber-400 uppercase tracking-widest mb-1">Aging Risk Warning</h4>
-                                        <p className="text-xs text-slate-400 leading-relaxed font-bold">
-                                            90일 이상 미회수된 {formatCurrency(report.unsettledLongTerm)} 규모의 채권/채무가 존재합니다.
+                                        <h4 className="text-sm font-black text-amber-400 uppercase tracking-widest mb-1">AR Aging Warning</h4>
+                                        <p className="text-xs text-slate-400 leading-relaxed font-black">
+                                            30일 이상 미회수된 {formatCurrency(report.overdueAR.amount)} 규모의 채권이 존재합니다. 매출 채권 회수 독려가 필요합니다.
                                         </p>
                                     </div>
                                 </div>
                             )}
-                            {report.blockedAmount > 0 && (
+                            {report.overdueAP.amount > 0 && (
                                 <div className="flex items-start gap-4 p-6 bg-rose-500/5 border border-rose-500/20 rounded-3xl">
                                     <div className="p-3 bg-rose-500/10 rounded-2xl text-rose-500">
-                                        <ShieldAlert size={20} />
+                                        <Clock size={20} />
                                     </div>
                                     <div>
-                                        <h4 className="text-sm font-black text-rose-400 uppercase tracking-widest mb-1">Settlement Block Active</h4>
-                                        <p className="text-xs text-slate-400 leading-relaxed font-bold">
-                                            {formatCurrency(report.blockedAmount)} 규모의 결제가 보류(blocked) 상태입니다.
+                                        <h4 className="text-sm font-black text-rose-400 uppercase tracking-widest mb-1">AP Aging Warning</h4>
+                                        <p className="text-xs text-slate-400 leading-relaxed font-black">
+                                            30일 이상 미지급된 {formatCurrency(report.overdueAP.amount)} 규모의 채무가 존재합니다. 지불 기한 관리가 시급합니다.
                                         </p>
                                     </div>
                                 </div>
@@ -235,7 +251,7 @@ export const RiskControl: React.FC = () => {
                                     </div>
                                     <div>
                                         <h4 className="text-sm font-black text-rose-400 uppercase tracking-widest mb-1">Liquidity Risk</h4>
-                                        <p className="text-xs text-slate-400 leading-relaxed font-bold">
+                                        <p className="text-xs text-slate-400 leading-relaxed font-black">
                                             3개월 내 {formatCurrency(report.cashRisk)} 규모의 현금 부족이 예상됩니다. 자금 조달 계획 검토가 시급합니다.
                                         </p>
                                     </div>
@@ -250,59 +266,43 @@ export const RiskControl: React.FC = () => {
                 </div>
             </div>
 
-            {/* Row 4 — Risk Pillars Chart */}
-            <div className="bg-[#151D2E] p-10 rounded-[3rem] border border-white/5 shadow-2xl">
-                <div className="flex flex-col gap-1 mb-10">
-                    <h3 className="text-lg font-black text-white italic flex items-center gap-3">
+            {/* Row 4 — Charts Row (Distribution & Status) */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                <div className="bg-[#151D2E] p-10 rounded-[3rem] border border-white/5 shadow-2xl">
+                    <h3 className="text-lg font-black text-white italic flex items-center gap-3 mb-10">
                         <PieChart size={20} className="text-blue-400" /> 리스크 유형 분포 <span className="text-slate-500 not-italic">(Risk Pillars)</span>
                     </h3>
-                </div>
-                <div className="h-[300px] flex items-center">
-                    <div className="flex-1 h-full">
+                    <div className="h-[300px]">
                         {RISK_DATA.length > 0 ? (
                             <ResponsiveContainer width="100%" height="100%">
                                 <RePieChart>
                                     <Pie data={RISK_DATA} innerRadius={80} outerRadius={120} paddingAngle={5} dataKey="value">
                                         {RISK_DATA.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                                     </Pie>
-                                    <RechartsTooltip 
-                                        contentStyle={{ backgroundColor: '#151D2E', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px' }}
-                                        itemStyle={{ color: '#e2e8f0' }}
-                                    />
+                                    <RechartsTooltip contentStyle={{ backgroundColor: '#151D2E', border: 'none', borderRadius: '12px', fontSize: '11px' }} />
                                 </RePieChart>
                             </ResponsiveContainer>
                         ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-500 italic text-sm">No significant risk pillars detected.</div>
+                            <div className="flex items-center justify-center h-full text-slate-500 italic">No Distribution Data</div>
                         )}
                     </div>
                 </div>
-            </div>
-
-            {/* Row 5 — Clearing Status Chart */}
-            <div className="bg-[#151D2E] p-10 rounded-[3rem] border border-white/5 shadow-2xl">
-                <div className="flex flex-col gap-1 mb-10">
-                    <h3 className="text-lg font-black text-white italic flex items-center gap-3">
+                <div className="bg-[#151D2E] p-10 rounded-[3rem] border border-white/5 shadow-2xl">
+                    <h3 className="text-lg font-black text-white italic flex items-center gap-3 mb-10">
                         <BarChart3 size={20} className="text-rose-400" /> 정산 집중 관리 상태 <span className="text-slate-500 not-italic">(Clearing Status)</span>
                     </h3>
-                </div>
-                <div className="h-[300px]">
-                    {CLEARING_STATUS.some(s => s.value > 0) ? (
+                    <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={CLEARING_STATUS} layout="vertical">
-                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#ffffff05" />
                                 <XAxis type="number" hide />
-                                <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} width={120} />
-                                <RechartsTooltip 
-                                    contentStyle={{ backgroundColor: '#151D2E', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '11px' }}
-                                />
-                                <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={30}>
-                                    {CLEARING_STATUS.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                                <YAxis dataKey="name" type="category" width={140} tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                <RechartsTooltip contentStyle={{ backgroundColor: '#151D2E', border: 'none', borderRadius: '12px', fontSize: '11px' }} />
+                                <Bar dataKey="value" radius={[0, 10, 10, 0]} barSize={32}>
+                                    {CLEARING_STATUS.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
                                 </Bar>
                             </BarChart>
                         </ResponsiveContainer>
-                    ) : (
-                        <div className="w-full h-full flex items-center justify-center text-slate-500 italic text-sm">All clearing statuses are up to date.</div>
-                    )}
+                    </div>
                 </div>
             </div>
         </div>

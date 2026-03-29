@@ -48,7 +48,7 @@ const AppContent = () => {
         <div className="flex h-screen font-sans antialiased overflow-hidden" style={{ backgroundColor: 'var(--bg-main)', color: 'var(--text-high)' }}>
             <Sidebar activeTab={activeTab} setTab={setTab} />
 
-            <main className="flex-1 flex flex-col min-w-0 transition-all duration-300 relative">
+            <main className="flex-1 flex flex-col min-w-0 transition-all duration-300 relative lg:pl-[260px]">
                 <BrandHeader />
 
                 <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar pt-16 lg:pt-0">

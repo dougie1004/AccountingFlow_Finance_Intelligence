@@ -29,8 +29,9 @@ export function projectScenarioFrontend(
     const LOOKBACK_MONTH_COUNT = 6;
 
     // 1. 날짜 기준 정렬 및 데이터 필터링 (Anchor 시점 이전)
+    // [FIX] 사용자 시뮬레이션 데이터를 포함하기 위해 'scenario' scope까지 포함하도록 필터링 완화
     const sorted = actualLedger
-        .filter(e => e.date <= projectionCutoff && (e.scope === 'actual' || !e.scope))
+        .filter(e => e.date <= projectionCutoff && (e.scope === 'actual' || e.scope === 'scenario' || !e.scope))
         .sort((a, b) => a.date.localeCompare(b.date));
 
     // 2. 월별 그룹핑
@@ -50,59 +51,58 @@ export function projectScenarioFrontend(
     const calcMonthlyTotals = (entries: JournalEntry[]) => {
         let rev = 0; let exp = 0;
         entries.forEach(e => {
-            const debit = e.debitAccountId;
-            const credit = e.creditAccountId;
+            const debit = (e.debitAccountId || e.debitAccount || "").toLowerCase();
+            const credit = (e.creditAccountId || e.creditAccount || "").toLowerCase();
 
-            if (!debit && !credit) return;
+            // VAT 포함 총액 기준 (Cash Flow 관점)
+            const total = e.amount + (e.vat || 0);
 
-            // 📌 Revenue (수익은 credit 기준)
-            if (credit?.startsWith('acc_4')) {
-                rev += e.amount;
+            // 📌 Revenue
+            if (credit.includes('acc_4') || credit.includes('매출') || credit.includes('수익')) {
+                rev += total;
             }
 
-            // 📌 Expense / Payroll / COGS (비용은 debit 기준)
+            // 📌 Expense (OPEX, Payroll, COGS)
             if (
-                debit?.startsWith('acc_5') || // COGS
-                debit?.startsWith('acc_6') || // Payroll
-                debit?.startsWith('acc_8')    // OPEX
+                debit.includes('acc_5') || debit.includes('acc_6') || debit.includes('acc_8') ||
+                debit.includes('비용') || debit.includes('급여') || debit.includes('임차') || 
+                debit.includes('마케팅') || debit.includes('수수료') || debit.includes('인건비') || debit.includes('용역')
             ) {
-                exp += e.amount;
+                exp += total;
             }
         });
         
-        // [DEBUG] Anchor Calculation Check
-        console.log('[ANCHOR_DEBUG]', { rev, exp, profit: rev - exp });
-        
-        return { rev, exp, pay: 0 }; // pay is folded into exp as per instruction
+        return { rev, exp, pay: 0 };
     };
 
 
     // 5. 최근 평균 계산 (Avg)
-    let revSum = 0; let expSum = 0; let paySum = 0;
+    let revSum = 0; let expSum = 0;
     recentMonths.forEach(m => {
         const t = calcMonthlyTotals(monthlyMap.get(m)!);
-        revSum += t.rev; expSum += t.exp; paySum += t.pay;
+        revSum += t.rev; expSum += t.exp;
     });
 
     const avgRevenue = revSum / Math.max(recentMonths.length, 1);
     const avgExpense = expSum / Math.max(recentMonths.length, 1);
-    const avgPayroll = paySum / Math.max(recentMonths.length, 1);
 
     // 6. 마지막 월 계산 (Last Month Anchor)
+    // 데이터가 있는 마지막 달을 찾는다.
     const lastMonthKey = monthsPresent[monthsPresent.length - 1];
     const lastTotals = lastMonthKey ? calcMonthlyTotals(monthlyMap.get(lastMonthKey)!) : { rev: 0, exp: 0, pay: 0 };
 
     const lastRevenue = lastTotals.rev;
     const lastExpense = lastTotals.exp;
-    const lastPayroll = lastTotals.pay;
 
-    // 7. 🔥 HYBRID (70% last + 30% avg) - 최적의 시작점 산출
+    // 7. 🔥 ANCHOR REFINEMENT
+    // 매출은 변동성이 크므로 Hybrid (70/30) 유지
+    // 비용(Burn)은 최신 현황(인건비 포함 등)이 중요하므로 100% Last Month (또는 최신) 적극 반영
     const baseAvgRevenue = (lastRevenue * 0.7) + (avgRevenue * 0.3);
-    const baseAvgOpex = (lastExpense * 0.7) + (avgExpense * 0.3);
-    const baseAvgPayroll = (lastPayroll * 0.7) + (avgPayroll * 0.3);
+    const baseAvgOpex = lastExpense > 0 ? lastExpense : avgExpense;
+    const baseAvgPayroll = 0; // exp에 통합됨
 
     // ✅ 디버깅 로그 (Final Hybrid Status)
-    console.log('[ANCHOR_HYBRID]', {
+    console.log('[ANCHOR_HYBRID_v11]', {
         lastMonth: lastMonthKey,
         lastRevenue,
         avgRevenue,
@@ -170,7 +170,7 @@ export function projectScenarioFrontend(
             debitAccountId: "acc_103",
             creditAccount: "상품매출",
             creditAccountId: "acc_401",
-            type: "Scenario",
+            type: "Revenue", // [V12] Fix: Enable Burn Multiple tracking
             scope: "future",
             status: "Approved"
         });
@@ -187,7 +187,7 @@ export function projectScenarioFrontend(
                 debitAccountId: "acc_801",
                 creditAccount: "보통예금",
                 creditAccountId: "acc_103",
-                type: "Scenario",
+                type: "Payroll",
                 scope: "future",
                 status: "Approved"
             });
@@ -205,7 +205,7 @@ export function projectScenarioFrontend(
                 debitAccountId: "acc_501",
                 creditAccount: "미지급금",
                 creditAccountId: "acc_253",
-                type: "Scenario",
+                type: "Expense",
                 scope: "future",
                 status: "Approved"
             });

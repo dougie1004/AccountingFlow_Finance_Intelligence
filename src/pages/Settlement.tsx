@@ -123,7 +123,7 @@ export const Settlement: React.FC = () => {
         const getNow = (dateString: string | undefined) => {
             if (dateString) {
                 const date = new Date(dateString);
-                date.setHours(23, 59, 59, 999); // Set to end of day for consistency
+                date.setHours(23, 59, 59, 999); 
                 return date;
             }
             return new Date();
@@ -142,73 +142,79 @@ export const Settlement: React.FC = () => {
             return !isScen;
         });
 
-        let prevTotal = 0;
-        const vendorsWithOverdue = new Set<string>();
-
-        // 🔥 STEP 1: 리스크 = ABS(월 단위 + 기호 보정 잔액) - SSOT v7 (Accounting-Sign Corrected)
-        const balanceMap: Record<string, number> = {};
+        // 🔥 [SSOT v8] Smart Reference Balancing for Settlement
+        const refBalances = new Map<string, number>();
         riskLedgerUsed.forEach(e => {
-            if (new Date(e.date) > riskNow) return;
-            const monthKey = e.date.slice(0, 7); 
-            const key = `${e.referenceId || e.vendor || 'global'}_${monthKey}`;
+            if (!e.referenceId || !['AR', 'AP'].includes(e.accountType || '')) return;
+            const totalAmount = e.amount + (e.vat || 0);
+            const isPlus = (e.accountType === 'AR' && (e.debitAccount.includes('외상매출') || e.debitAccount.includes('미수'))) ||
+                           (e.accountType === 'AP' && (e.creditAccount.includes('외상매입') || e.creditAccount.includes('미지급')));
+            const isMinus = (e.accountType === 'AR' && (e.creditAccount.includes('외상매출') || e.creditAccount.includes('미수'))) ||
+                            (e.accountType === 'AP' && (e.debitAccount.includes('외상매입') || e.debitAccount.includes('미지급')));
             
-            let change = 0;
-            const isDeAR = e.debitAccount.includes('외상매출');
-            const isCrAR = e.creditAccount.includes('외상매출');
-            const isCrAP = e.creditAccount.includes('미지급') || e.creditAccount.includes('외상매입');
-            const isDeAP = e.debitAccount.includes('미지급') || e.debitAccount.includes('외상매입');
-
-            if (e.accountType === 'AR') {
-                change = (isDeAR ? e.amount : 0) - (isCrAR ? e.amount : 0);
-            } else if (e.accountType === 'AP') {
-                change = (isCrAP ? e.amount : 0) - (isDeAP ? e.amount : 0);
-            } else {
-                return; // Risk only for AR/AP
-            }
-
-            balanceMap[key] = (balanceMap[key] || 0) + change;
+            const delta = (isPlus ? totalAmount : 0) - (isMinus ? totalAmount : 0);
+            refBalances.set(e.referenceId, (refBalances.get(e.referenceId) || 0) + delta);
         });
 
-        const totalAmount = Object.values(balanceMap).reduce((sum, bal) => sum + Math.abs(bal), 0);
-        total = totalAmount;
+        const autoMatchedRefs = new Set<string>();
+        refBalances.forEach((bal, id) => {
+            if (Math.abs(bal) < 100) autoMatchedRefs.add(id);
+        });
+
+        // 집계 로직
+        const countedRefs = new Set<string>();
+        const overdueRefs = new Set<string>();
+        const vendorsWithOverdue = new Set<string>();
 
         riskLedgerUsed.forEach(e => {
             const entryDate = new Date(e.date);
             if (entryDate > riskNow) return;
 
-            // Only count currently unmatched in the count KPI
-            if (e.matchingStatus !== 'matched') {
+            const isAutoMatched = e.referenceId && autoMatchedRefs.has(e.referenceId);
+            if (e.matchingStatus === 'matched' || isAutoMatched || settledIds.has(e.id)) return;
+
+            // [FIX] Only sum generation entries to match the detail list filter
+            // RECEIVABLES: Debit AR is generation, Credit AR is settlement
+            // PAYABLES: Credit AP/Liability is generation, Debit AP/Liability is settlement
+            const isAR = viewMode === 'RECEIVABLES';
+            const isAP = viewMode === 'PAYABLES';
+            
+            const isGeneration = isAR ? e.debitAccount.includes('외상매출') : (isAP ? (e.creditAccount.includes('외상매입') || e.creditAccount.includes('미지급')) : true);
+            if (!isGeneration) return;
+
+            // Invoice 단위 집계를 위해 referenceId 또는 ID 사용
+            const refKey = e.referenceId || e.id;
+            
+            if (!countedRefs.has(refKey)) {
                 count++;
-                const amt = Math.abs(e.amount);
-                
-                const diffDays = Math.floor((riskNow.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
-
-                if (diffDays <= 30) agingData[0].value += amt;
-                else if (diffDays <= 60) agingData[1].value += amt;
-                else if (diffDays <= 90) agingData[2].value += amt;
-                else if (diffDays <= 180) agingData[3].value += amt;
-                else if (diffDays <= 270) agingData[4].value += amt;
-                else if (diffDays <= 360) agingData[5].value += amt;
-                else agingData[6].value += amt;
-
-                if (diffDays > 30) {
-                    overdueCount++;
-                    if (e.vendor) vendorsWithOverdue.add(e.vendor);
-                }
+                countedRefs.add(refKey);
             }
+            
+            const amt = Math.abs(e.amount);
+            total += amt;
+            
+            const diffDays = Math.floor((riskNow.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
 
-            if (entryDate <= prevMonth) prevTotal += e.amount;
+            if (diffDays <= 30) agingData[0].value += amt;
+            else if (diffDays <= 60) agingData[1].value += amt;
+            else if (diffDays <= 90) agingData[2].value += amt;
+            else if (diffDays <= 180) agingData[3].value += amt;
+            else if (diffDays <= 270) agingData[4].value += amt;
+            else if (diffDays <= 360) agingData[5].value += amt;
+            else agingData[6].value += amt;
+
+            if (diffDays > 30) {
+                if (!overdueRefs.has(refKey)) {
+                    overdueCount++;
+                    overdueRefs.add(refKey);
+                }
+                if (e.vendor) vendorsWithOverdue.add(e.vendor);
+            }
         });
 
-        console.log("=== SETTLEMENT SSOT DEBUG ===");
-        console.log("total exposure (riskAmount):", total);
-        console.log("total entries in list:", currentEntries.length);
-        console.log("risk ledger used size:", riskLedgerUsed.length);
-        console.log("unmatched risk total:", total);
+        const trend = 0; // Simplified for now
 
-        const trend = prevTotal === 0 ? 0 : ((total - prevTotal) / prevTotal) * 100;
-
-        return { total, count, overdueCount, agingData, trend, criticalVendors: vendorsWithOverdue.size };
+        return { total, count, overdueCount, agingData, trend, criticalVendors: vendorsWithOverdue.size, autoMatchedRefs };
     }, [currentEntries, selectedDate, viewMode]);
 
     return (
@@ -223,9 +229,14 @@ export const Settlement: React.FC = () => {
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em]">Operational Risk & Settlement Intelligence</span>
                             </div>
-                            <h1 className="text-4xl font-black text-white tracking-tighter italic uppercase">
-                                리스크 익스포저 및 정산 관리 <span className="text-slate-500 text-xl font-bold not-italic ml-2">(Risk Exposure)</span>
-                            </h1>
+                            <div className="flex items-center gap-3">
+                                <h1 className="text-4xl font-black text-white tracking-tighter italic uppercase">
+                                    리스크 익스포저 및 정산 관리 <span className="text-slate-500 text-xl font-bold not-italic ml-2">(Risk Exposure)</span>
+                                </h1>
+                                <div className="px-5 py-1.5 bg-purple-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg shadow-purple-600/20">
+                                    SETTLEMENT VIEW → 정산/매칭 상태 기반 분석
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -286,8 +297,14 @@ export const Settlement: React.FC = () => {
                     <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 italic">Risk Analysis Center</p>
                     <p className="text-[11px] font-bold text-slate-300 leading-relaxed uppercase">
                         현재 {viewMode} 기준 총 <span className="text-white font-black text-lg">₩{viewMetrics.total.toLocaleString()}</span>의 리스크 노출이 감지되었습니다. 
-                        건전한 현금흐름을 위해 연체 건에 대한 즉각적인 조치를 권고합니다.
                     </p>
+                    <div className="mt-4 p-4 bg-white/5 border border-white/10 rounded-2xl flex flex-col gap-1">
+                        <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">📢 Data Integrity Notice</span>
+                        <p className="text-[10px] font-bold text-slate-400">
+                            재무제표 기준(Net)은 실제 장부와 일치하며, 정산 기준(Gross)은 아직 매칭되지 않은 발생 전표의 합계입니다.
+                        </p>
+                        <p className="text-[10px] font-bold text-slate-500 italic">"재무제표 기준(Net) vs 정산 기준(Gross) 차이 존재 가능"</p>
+                    </div>
                 </div>
             </div>
 
@@ -392,14 +409,15 @@ export const Settlement: React.FC = () => {
                         <tbody className="divide-y divide-white/5">
                             {currentEntries
                                 .filter(e => {
-                                    if (settledIds.has(e.id)) return false;
-                                    if (viewMode === 'RECEIVABLES') return !e.creditAccount.includes('외상매출');
-                                    if (viewMode === 'PAYABLES') return !e.debitAccount.includes('외상매입') && !e.debitAccount.includes('미지급');
-                                    return true;
-                                })
+                                     const isAutoMatched = e.referenceId && viewMetrics.autoMatchedRefs.has(e.referenceId);
+                                     if (settledIds.has(e.id) || isAutoMatched) return false;
+                                     if (viewMode === 'RECEIVABLES') return !e.creditAccount.includes('외상매출');
+                                     if (viewMode === 'PAYABLES') return !e.debitAccount.includes('외상매입') && !e.debitAccount.includes('미지급');
+                                     return true;
+                                 })
                                 .filter(e => new Date(e.date) <= new Date(selectedDate))
                                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                .slice(0, 20).map((e, idx) => {
+                                .map((e, idx) => {
                                 const diffDays = Math.floor((new Date(selectedDate).getTime() - new Date(e.date).getTime()) / (1000 * 60 * 60 * 24));
                                 const isOverdue = diffDays > 30;
                                 

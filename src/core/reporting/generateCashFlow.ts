@@ -45,44 +45,86 @@ export function generateCashFlow(entries: JournalEntry[], initialCash: number = 
 
   const monthly = groupByMonth(entries);
 
+  // Financing 구분 로직 [V2.2]
+  const isFinancing = (e: JournalEntry) => {
+    const desc = e.description || "";
+    return (
+      e.type === "Equity" ||
+      e.type === "Funding" ||
+      desc.includes("투자") ||
+      desc.includes("차입") ||
+      desc.includes("대출") ||
+      desc.includes("Capital")
+    );
+  };
+
   let cash = initialCash; 
-  const result: { date: string; cash: number; delta: number }[] = [];
+  const result: { 
+    date: string; 
+    cash: number; 
+    delta: number; 
+    cashIn: number; 
+    cashOut: number;
+    operatingCashIn: number;
+    financingCashIn: number;
+  }[] = [];
 
   monthly.forEach((month) => {
-    let delta = 0;
+    let monthlyIn = 0;
+    let monthlyOut = 0;
+    let monthlyOperatingIn = 0;
+    let monthlyFinancingIn = 0;
 
     month.entries.forEach((e) => {
       // ✅ Debit: 현금 계정으로의 입금 (현금 증가)
       if (isCashAccount(e.debitAccountId)) {
-        delta += e.amount;
+        const amount = e.amount;
+        monthlyIn += amount;
+        
+        if (isFinancing(e)) {
+          monthlyFinancingIn += amount;
+        } else {
+          monthlyOperatingIn += amount;
+        }
       }
 
       // ✅ Credit: 현금 계정에서의 출금 (현금 감소)
       if (isCashAccount(e.creditAccountId)) {
-        delta -= e.amount;
+        monthlyOut += e.amount;
       }
 
       // 복합 전표 처리 (있을 경우)
       if (e.complexLines) {
           e.complexLines.forEach(l => {
               if (isCashAccount(l.accountId)) {
-                delta += (l.debit - l.credit);
+                if (l.debit > 0) {
+                  const amount = l.debit;
+                  monthlyIn += amount;
+                  // 복합 전표의 경우 부모 entry의 성격을 따름
+                  if (isFinancing(e)) {
+                    monthlyFinancingIn += amount;
+                  } else {
+                    monthlyOperatingIn += amount;
+                  }
+                }
+                if (l.credit > 0) monthlyOut += l.credit;
               }
           });
       }
     });
 
+    const delta = monthlyIn - monthlyOut;
     cash += delta;
 
     result.push({
       date: month.date,
       cash,
       delta,
+      cashIn: monthlyIn,
+      cashOut: monthlyOut,
+      operatingCashIn: monthlyOperatingIn,
+      financingCashIn: monthlyFinancingIn
     });
-
-    // excessive logging can slow down, so only first few and last few if needed,
-    // but user requested this log specifically.
-    // console.log(`🧪 [${month.date}] delta:`, delta, "cash:", cash);
   });
 
   console.log("🧪 CASH FLOW GENERATED. SAMPLE:", result.slice(0, 3));

@@ -8,7 +8,7 @@ interface ExplainableKPIProps {
     result: MetricResult | null;
     color?: string;
     icon?: React.ReactNode;
-    formatValue?: (val: number) => string;
+    formatValue?: (val: number) => React.ReactNode;
     description?: string; // Qualitative explanation (hover tooltip)
     onClick?: () => void;
 }
@@ -66,7 +66,7 @@ export const ExplainableKPI: React.FC<ExplainableKPIProps> = ({
                 >
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-tight">{label}</p>
+                            <p className="text-[12px] font-black text-slate-500 uppercase tracking-widest leading-tight">{label}</p>
                             {description && <Info size={10} className="text-slate-700 group-hover:text-indigo-400 transition-colors" />}
                         </div>
                         <div className="flex items-center gap-2">
@@ -82,8 +82,8 @@ export const ExplainableKPI: React.FC<ExplainableKPIProps> = ({
                             {formatValue(result.value)}
                         </h4>
                         
-                        <p className="text-[9px] font-bold text-slate-600 uppercase italic mt-1 flex items-center gap-1">
-                            <Database size={8} /> {result.dataSource === 'scenario' ? 'SCENARIO (시뮬레이션)' : 'ACTUAL (실제 장부)'} 데이터 기반
+                        <p className="text-[11px] font-bold text-slate-600 uppercase italic mt-1 flex items-center gap-1">
+                            <Database size={10} /> {result.dataSource === 'scenario' ? 'SCENARIO (시뮬레이션)' : 'ACTUAL (실제 장부)'} 데이터 기반
                         </p>
                     </div>
                 </div>
@@ -98,12 +98,12 @@ export const ExplainableKPI: React.FC<ExplainableKPIProps> = ({
                         >
                             <div className="p-6 space-y-4">
                                 <div>
-                                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-tighter mb-2 flex items-center gap-2">
-                                        <Calculator size={12} /> 계산 근거 분석 (Calculation Analysis)
+                                    <p className="text-[13px] font-black text-blue-400 uppercase tracking-tighter mb-2 flex items-center gap-2">
+                                        <Calculator size={14} /> 계산 근거 분석 (Calculation Analysis)
                                     </p>
                                     <div className="space-y-2">
                                         {Object.entries(result.inputs).map(([key, val]) => (
-                                            <div key={key} className="flex justify-between items-center text-[11px]">
+                                            <div key={key} className="flex justify-between items-center text-[12px]">
                                                 <span className="text-slate-500 font-bold">{key}</span>
                                                 <span className="text-white font-mono">{typeof val === 'number' ? val.toLocaleString() : val}</span>
                                             </div>
@@ -112,13 +112,13 @@ export const ExplainableKPI: React.FC<ExplainableKPIProps> = ({
                                 </div>
 
                                 <div className="pt-3 border-t border-white/5">
-                                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter mb-1">산정 공식 (Formula)</p>
-                                    <p className="text-[11px] font-mono text-slate-300 bg-white/5 p-2 rounded-lg italic text-wrap break-all">
+                                    <p className="text-[12px] font-black text-emerald-400 uppercase tracking-tighter mb-1">산정 공식 (Formula)</p>
+                                    <p className="text-[12px] font-mono text-slate-300 bg-white/5 p-2 rounded-lg italic text-wrap break-all">
                                         {result.formula}
                                     </p>
                                 </div>
 
-                                <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 uppercase tracking-widest pt-2">
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-widest pt-2">
                                     <span className="flex items-center gap-1.5"><Clock size={10} /> {result.period}</span>
                                     <span className="text-blue-500/50">#투명한_계산_검증</span>
                                 </div>

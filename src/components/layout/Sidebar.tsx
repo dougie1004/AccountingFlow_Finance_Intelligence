@@ -204,7 +204,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 </button>
             </div>
 
-            <aside className="hidden lg:block w-[260px] h-screen shrink-0 sticky top-0">
+            <aside className="hidden lg:block w-[260px] h-screen shrink-0 fixed top-0 left-0 z-[100]">
                 <SidebarContent />
             </aside>
 
@@ -223,7 +223,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                             animate={{ x: 0 }}
                             exit={{ x: "-100%" }}
                             transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-                            className="fixed inset-y-0 left-0 z-[70] w-[260px] lg:hidden"
+                            className="fixed inset-y-0 left-0 z-[100] w-[260px] lg:hidden"
                         >
                             <SidebarContent />
                         </motion.aside>

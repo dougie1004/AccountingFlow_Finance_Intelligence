@@ -120,21 +120,27 @@ export const MetricRegistry = {
             monthlyDeltas.set(month, (monthlyDeltas.get(month) || 0) + delta);
         });
 
-        const deltas = Array.from(monthlyDeltas.values());
-        const burnMonths = deltas.filter(d => d < 0);
-        const avgBurn = burnMonths.length > 0 
-            ? burnMonths.reduce((sum, val) => sum + Math.abs(val), 0) / burnMonths.length
-            : 0;
+        // 🔥 [SSOT v8] Cumulative Drawdown Simulation
+        const sortedMonths = Array.from(monthlyDeltas.keys()).sort();
+        let runningCash = liquidity;
+        let monthsToZero = 0;
+        
+        for (const m of sortedMonths) {
+            const d = monthlyDeltas.get(m) || 0;
+            runningCash += d;
+            if (runningCash <= 0) break;
+            monthsToZero++;
+            if (monthsToZero >= 36) break;
+        }
 
-        const runway = avgBurn > 0 ? (liquidity / avgBurn) : 24.1;
-        const exhaustionMonth = Math.round(runway * 10) / 10;
+        const exhaustionMonth = (runningCash > 0 && monthsToZero >= sortedMonths.length) ? 36.1 : monthsToZero;
 
         return {
             value: exhaustionMonth,
-            isInfinite: exhaustionMonth >= 24,
-            label: exhaustionMonth >= 24 ? "24.0+ 개월" : `${exhaustionMonth.toFixed(1)}개월`,
-            inputs: { '현재 유동성': liquidity, '평균 예상 소모액': avgBurn },
-            formula: '예상 소모액 기반 선형 런웨이 (Linear Projection)',
+            isInfinite: exhaustionMonth >= 36,
+            label: exhaustionMonth >= 36 ? "36.0+ 개월" : `${exhaustionMonth.toFixed(1)}개월`,
+            inputs: { '현재 유동성': liquidity, '임계 예상 지점': exhaustionMonth.toFixed(1) + '개월' },
+            formula: '누적 현금 흐름 순차 소진 모델 (Sequential Cash-Out)',
             period: '미래 지표 분석',
             dataSource: 'scenario'
         };
@@ -173,9 +179,37 @@ export const MetricRegistry = {
         status: r < (threshold || 3) ? 'CRITICAL' : 'SAFE', 
         message: r < (threshold || 3) ? 'High Risk' : 'Stable' 
     }),
-    calculateBurnMultiple: (ledger: any[], date: string): MetricResult => ({
-        value: 0, inputs: {}, formula: '지출 / 연간반복매출(ARR)', period: '데이터 없음', dataSource: 'scenario'
-    }),
+    calculateBurnMultiple: (futureLedger: JournalEntry[], date: string): MetricResult => {
+        const futureEntries = futureLedger.filter(e => e.date > date);
+        let rev = 0; let exp = 0;
+        futureEntries.forEach(e => {
+            if (e.type === 'Revenue') rev += e.amount;
+            else if (e.type === 'Expense' || e.type === 'Payroll') exp += e.amount;
+        });
+        const netBurn = (exp - rev) > 0 ? (exp - rev) : 0;
+        const newRevenue = rev; 
+
+        // [V11] Normalize to Monthly Average for intuitive interpretation
+        const months = futureEntries.length > 0 ? new Set(futureEntries.map(e => e.date.substring(0, 7))).size : 1;
+        const avgNetBurn = netBurn / months;
+        const avgNewRevenue = newRevenue / months;
+        
+        // Burn Multiple = Net Burn / New Revenue (Ratio remains same as Total/Total)
+        const value = newRevenue > 0 ? (netBurn / newRevenue) : (netBurn > 0 ? Infinity : 0);
+        
+        return {
+            value,
+            inputs: { 
+                '시뮬레이션 월평균 순 적자(Burn)': Math.round(avgNetBurn).toLocaleString(), 
+                '시뮬레이션 월평균 신규 매출': Math.round(avgNewRevenue).toLocaleString(),
+                '분석 대상 기간': months + '개월'
+            },
+            formula: '월평균 Net Burn / 월평균 신규 매출',
+            period: `시나리오 ${months}개월 분석`,
+            dataSource: 'scenario' as MetricSource,
+            label: value === 0 ? "Excellent (Profitable)" : value === Infinity ? "N/A" : (value <= 1.0 ? "Excellent" : value <= 2.0 ? "Good" : "Warning")
+        };
+    },
     calculateSurvivalProbability: (r: number): MetricResult => {
         let prob = 50;
         let label = "위험 진입 (데스밸리)";
@@ -204,6 +238,50 @@ export const MetricRegistry = {
             formula: '단계별 선형 사망 리스크 모델 (Statistical Sample)',
             period: '미래 예측',
             dataSource: 'scenario'
+        };
+    },
+    getStrategicKPIs: (params: any) => {
+        return {
+            survival: {
+                runway: params.projectedRunway,
+                liquidity: params.liquidityRunway,
+                status: params.projectionResult
+            },
+            efficiency: {
+                burnMultiple: params.burnMultipleResult,
+                burnBridge: {
+                    value: params.burnBridge.diff || 0,
+                    inputs: {
+                        'Operating Burn (P&L)': params.burnBridge.pnlBurn,
+                        'Cash Out (Actual)': params.burnBridge.cashOut,
+                        'Status': params.burnBridge.explanation || ""
+                    },
+                    formula: 'Operating Burn (P&L) - Cash Out (Cash)',
+                    period: 'Historical Average',
+                    dataSource: 'actual' as MetricSource
+                }
+            },
+            breakEven: {
+                monthly: {
+                    value: params.breakEvenMonth || 0,
+                    label: params.breakEvenMonth ? `${params.breakEvenMonth}개월` : "N/A",
+                    formula: '월간 수익 >= 운영 비용 시점',
+                    dataSource: 'scenario' as MetricSource
+                },
+                cumulative: {
+                    value: params.cumulativeBreakEvenMonth || 0,
+                    label: params.cumulativeBreakEvenMonth ? `${params.cumulativeBreakEvenMonth}개월` : "N/A",
+                    formula: 'Σ(과거 실적 + 미래 예측) >= 0 시점',
+                    dataSource: 'scenario' as MetricSource
+                }
+            },
+            risk: {
+                deathValley: {
+                    value: params.minCash || 0,
+                    formula: '최저 예상 잔액 지점 추적',
+                    dataSource: 'scenario' as MetricSource
+                }
+            }
         };
     }
 };

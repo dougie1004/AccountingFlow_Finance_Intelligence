@@ -21,8 +21,19 @@ import {
     analyzeFundingTiming,
     generateEquityInsight
 } from '../engines/equityEngine';
-import { calculateRunway, calculateAvgBurn } from '../core/metrics/metricRegistry';
-import { generateCFOInsight, INSIGHT_UI_MAP } from '../engines/cfoInsight';
+import {
+    calculateSequentialRunway,
+    calculateCashRunway,
+    calculateCashBurn,
+    calculateCashBurnBreakdown,
+    calculateOperatingBurn
+} from '../core/metrics/metricRegistry';
+import {
+    generateCFOInsight as generateDeterministicCFOInsight,
+    INSIGHT_UI_MAP
+} from '../engines/cfoInsight';
+import { calculateCashVsPLBridge } from '../core/metrics/bridgeMetrics';
+import { generateCFOInsight } from '../core/insight/generateCFOInsight';
 
 
 
@@ -30,6 +41,7 @@ import { verifyJournalIntegrity } from '../utils/debugIntegrity';
 import { generateMonthlyPnL } from '../core/reporting/generateMonthlyPnL';
 import { generateCashFlow } from '../core/reporting/generateCashFlow';
 import { projectScenarioFrontend } from '../core/simulation/strategicSimulator';
+import { generateProjectionLedger, buildMetrics } from '../core/ssotEngine';
 
 const CustomChartTooltip = ({ active, payload, label, stats }: any) => {
     if (active && payload && payload.length) {
@@ -250,7 +262,7 @@ const StrategicCompass: React.FC = () => {
         accounts,
         baselineSnapshot,
         setBaselineSnapshot,
-        scenarioResults: scenarioLedger,
+        scenarioResults: contextScenarioLedger,
         setScenarioResults: setScenarioLedger,
         baselineEntries,
         setBaselineEntries,
@@ -405,46 +417,24 @@ const StrategicCompass: React.FC = () => {
     /**
      * 핵심: projectionLedger를 단일 소스화하여 상태 파편화를 막는다.
      */
-    const executeSimulation = useCallback(async () => {
-        if (!baselineSnapshot?.ledger || baselineSnapshot.ledger.length === 0) return;
+    /**
+     * [FIX] Infinite Loop Reduction Step
+     * 1회 실행으로 고정: useMemo 기반으로 변동성 차단
+     */
+    const scenarioLedger = useMemo(() => {
+        if (!actualLedger || actualLedger.length === 0) return [];
 
-        setLoading(true);
-        try {
-            // [UX GUIDE-PROJECT] Unified JS Simulation Pipeline
-            const result = projectScenarioFrontend(
-                baselineSnapshot.ledger,
-                baselineSnapshot.date,
-                {
-                    revenueMult: scenarioConfig.revenueMult,
-                    expenseMult: scenarioConfig.expenseMult,
-                    fixedCostDelta: scenarioConfig.fixedCostDelta
-                },
-                scenarioConfig.macro,
-                scenarioConfig.projectionMonths
-            );
-
-            if (!result || result.length === 0) {
-                console.warn("⚠️ Simulation returned empty");
-                return;
-            }
-
-            console.log(`[Compass] Pipeline Active: Generated ${result.length} scenario entries.`);
-            setScenarioLedger(result);
-        } catch (err) {
-            console.error('Simulation Failed', err);
-        } finally {
-            setLoading(false);
-        }
-    }, [baselineSnapshot, scenarioConfig, setScenarioLedger]);
-
-    // 🔥 [FULL PATCH Step 3] useEffect 구조 정리 (Dependencies Clean)
-    useEffect(() => {
-        executeSimulation();
-    }, [executeSimulation]);
+        return projectScenarioFrontend(
+            actualLedger,
+            selectedDate,
+            { revenueMult, expenseMult, fixedCostDelta },
+            macro,
+            projectionMonths
+        );
+    }, [actualLedger, selectedDate, revenueMult, expenseMult, fixedCostDelta, macro, projectionMonths]); // ✅ Full reactive control
 
     // [Step 6] 디버깅 로그
     useEffect(() => {
-        console.log("📊 projectionLedger (scenarioPart) size:", scenarioLedger?.length);
     }, [scenarioLedger]);
 
     // Equity control is now handled reactively by equityReport useMemo
@@ -489,10 +479,6 @@ const StrategicCompass: React.FC = () => {
             ...actualLedger,
             ...scenarioLedger
         ];
-        // [DEBUG 7-1] Ledger Verification
-        console.log("🔥 [SSOT] Projection Size:", combined.length);
-        const hasFuture = combined.some(e => e.scope === "future" || e.type === "Scenario");
-        console.log("🔥 [SSOT] Has Future (Scenario):", hasFuture);
 
         return combined;
     }, [actualLedger, scenarioLedger]);
@@ -522,10 +508,6 @@ const StrategicCompass: React.FC = () => {
         generateMonthlyPnL([...actualLedger, ...baselineEntries], ANALYSIS_YEARS, selectedDate),
         [actualLedger, baselineEntries, selectedDate]);
 
-    // [CONSTITUTION 3-2] Cash Flow Generation (Explicit Splits)
-    const scenarioCashFlow = useMemo(() =>
-        generateCashFlow([...actualLedger, ...scenarioLedger], 0),
-        [actualLedger, scenarioLedger]);
 
     const baselineCashFlow = useMemo(() =>
         generateCashFlow([...actualLedger, ...baselineEntries], 0),
@@ -563,6 +545,20 @@ const StrategicCompass: React.FC = () => {
         return profitImpact;
     }, [accounts]);
 
+    /**
+     * [STEP 1 Verification] Stable Connectivity Test
+     * 무한 루프 방지를 위해 dependency를 actualLedger로 한정함.
+     */
+    const ssotProjectionResult = useMemo(() => {
+        return generateProjectionLedger({
+            actualLedger: [...actualLedger, ...scenarioLedger] // ❗ Migration: Use full projection
+        });
+    }, [actualLedger, scenarioLedger]);
+
+    const ssotMetrics = useMemo(() => {
+        return buildMetrics(ssotProjectionResult);
+    }, [ssotProjectionResult]);
+
     const { chartData, anchorValidation } = useMemo(() => {
         if (!financials || !actualLedger.length) return { chartData: [], anchorValidation: null };
 
@@ -571,17 +567,9 @@ const StrategicCompass: React.FC = () => {
         const anchorMonthFormatted = anchorDate.substring(0, 7);
 
         // Pivot Offset: Align T0 Cash to financials.cash
-        const anchorCF = scenarioCashFlow.find((c: any) => c.date === anchorMonthFormatted);
+        const anchorCF = ssotMetrics.cashflow.find((c: any) => c.date === anchorMonthFormatted);
         const currentPivotCash = anchorCF ? anchorCF.cash : 0;
         const offset = financials.cash - currentPivotCash;
-
-        // ✅ Step 5. 생성 결과 비교 로그 (Ledger 수준)
-        console.log('[COMPARE_LEDGER]', {
-            baselineEntriesCount: baselineEntries.length,
-            scenarioLedgerCount: scenarioLedger.length,
-            baselineFirst: baselineEntries[0],
-            scenarioFirst: scenarioLedger[0]
-        });
 
         // 🚨 Step 6. 동일성 체크 (핵심)
         if (baselineEntries.length > 0 && scenarioLedger.length > 0 && (revenueMult !== 1 || expenseMult !== 1)) {
@@ -597,7 +585,6 @@ const StrategicCompass: React.FC = () => {
         const baselinePnLMap = new Map(baselinePnL.map((p: any) => [p.month, p]));
         const baseCFMap = new Map(baselineCashFlow.map((c: any) => [c.date, c]));
 
-        // ✅ Step 7. PnL 비교 로그 (특정 월 추출)
         // 3개월 후 시점(projection) 데이터 확인
         const testMonth = new Date(new Date(anchorMonthFormatted).getFullYear(), new Date(anchorMonthFormatted).getMonth() + 3, 1)
             .toISOString().substring(0, 7);
@@ -606,13 +593,6 @@ const StrategicCompass: React.FC = () => {
         const testScenario = scenarioPnLMap.get(testMonth)?.netIncome;
         const testBaseline = baselinePnLMap.get(testMonth)?.netIncome;
 
-        console.log('[COMPARE_PNL]', {
-            month: testMonth,
-            actual: testActual,
-            scenario: testScenario,
-            baseline: testBaseline
-        });
-
         // 🚨 Step 8. 동일값 감지 시 에러
         if (testScenario !== undefined && testScenario !== 0 && (revenueMult !== 1 || expenseMult !== 1)) {
             if (testScenario === testActual && testScenario === testBaseline) {
@@ -620,9 +600,9 @@ const StrategicCompass: React.FC = () => {
             }
         }
 
-        const nowIndex = scenarioCashFlow.findIndex((cf: any) => cf.date === anchorMonthFormatted);
+        const nowIndex = ssotMetrics.cashflow.findIndex((cf: any) => cf.date === anchorMonthFormatted);
 
-        const data = scenarioCashFlow.map((cf: any, index: number) => {
+        const data = ssotMetrics.cashflow.map((cf: any, index: number) => {
             const actual = actualPnLMap.get(cf.date);
             const scenario = scenarioPnLMap.get(cf.date);
             const baseline = baselinePnLMap.get(cf.date);
@@ -656,7 +636,7 @@ const StrategicCompass: React.FC = () => {
                 ssot: financials.cash
             }
         };
-    }, [financials, actualLedger, scenarioCashFlow, baselineCashFlow, actualPnL, scenarioPnL, baselinePnL]);
+    }, [financials, actualLedger, trialBalance, selectedDate, ssotMetrics.cashflow, baselineCashFlow, actualPnL, scenarioPnL, baselinePnL, revenueMult, expenseMult, baselineEntries, scenarioLedger]);
 
     // [V2.6] Unified Metric Results (Financial Truth Engine)
     const metricResults = useMemo(() => {
@@ -669,35 +649,124 @@ const StrategicCompass: React.FC = () => {
         const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
 
         // 3. Runway (Deterministic Strategy Execution)
-        const currentCash = financials.cash; // Latest actual cash ONLY
-        const futureCashDeltas = scenarioCashFlow.map(cf => cf.delta);
+        const currentCash = financials.cash;
+        const currentYearMonth = (selectedDate || '').substring(0, 7);
+        const strategyMonths = ssotMetrics.cashflow.filter((cf: any) => cf.date > currentYearMonth);
+        const futureCashDeltas = strategyMonths.map((cf: any) => cf.delta);
 
-        const runwayVal = calculateRunway({
-            currentCash,
+        // [V11 FIX] Build Burn Average strictly from historical data <= selectedDate
+        const allHistoricalMonths = ssotMetrics.cashflow.filter((cf: any) => cf.date <= currentYearMonth);
+
+        // 🧩 [V2.3] 최근 6개월 데이터만 평균으로 산입 (최신 정보 반영)
+        const RECENT_WINDOW = 6;
+        const historicalMonths = allHistoricalMonths.slice(-RECENT_WINDOW);
+
+        // [V11 DEBUG] 2028-12 기준 월별 리스트 출력
+        if (selectedDate?.includes('2028-12')) {
+            console.log("=== [DEBUG] 2028-12 (Recently Window) Cash In/Out 리스트 ===");
+            historicalMonths.forEach(m => {
+                console.log(`${m.date}: OpIn(${Math.round(m.operatingCashIn || 0)}), FinIn(${Math.round(m.financingCashIn || 0)}), CashOut(${Math.round(m.cashOut)})`);
+            });
+            console.log("=== [DEBUG] END LIST ===");
+        }
+
+        const totalOperatingIn = historicalMonths.reduce((sum, m) => sum + (m.operatingCashIn || 0), 0);
+        const totalFinancingIn = historicalMonths.reduce((sum, m) => sum + (m.financingCashIn || 0), 0);
+        const totalOut = historicalMonths.reduce((sum, m) => sum + (m.cashOut || 0), 0);
+
+        const avgOperatingIn = historicalMonths.length > 0 ? (totalOperatingIn / historicalMonths.length) : 0;
+        const avgOut = historicalMonths.length > 0 ? (totalOut / historicalMonths.length) : 0;
+
+        // 🧩 핵심 로직: Burn 계산 시 Operating Cash In만 사용 [V2.2]
+        const netCashAvg = avgOperatingIn - avgOut;
+        const netBurnValue = netCashAvg < 0 ? Math.abs(netCashAvg) : 0;
+
+        // [V11] Round values for UI and logical integrity
+        const burnBreakdown = {
+            cashIn: Math.round(avgOperatingIn),
+            financingIn: Math.round(totalFinancingIn),
+            cashOut: Math.round(avgOut),
+            netBurn: Math.round(netBurnValue),
+            isBurning: netCashAvg < 0,
+            netCashAvg: Math.round(netCashAvg),
+            window: historicalMonths.length
+        };
+        const cashBurn = burnBreakdown.netBurn;
+
+        // [V2.6] Runway — Sequential Cash-Out model (장기 생존력)
+        const runwayVal = calculateSequentialRunway({
+            currentCash: liquidCash.value,
             futureCashDeltas
         });
 
-        // [V2.6] Liquidity Runway: Adjusted for unsettled liabilities
-        const liquidRunwayVal = liquidCash.value > 0 ? liquidCash.value / (calculateAvgBurn(futureCashDeltas) || 1) : 0;
+        // [V2.5] Inflection Point (First Negative Month) Calculation
+        let inflectionPoint = null;
+        for (let i = 0; i < futureCashDeltas.length; i++) {
+            if (futureCashDeltas[i] < 0) {
+                const targetMonth = strategyMonths[i];
+                inflectionPoint = {
+                    monthsOffset: i + 1,
+                    date: targetMonth.date
+                };
+                break;
+            }
+        }
 
         const runway = {
             value: runwayVal,
-            inputs: { 
-                'Gross Cash': currentCash, 
-                'Liquid Cash (Net)': liquidCash.value,
-                'Monthly Avg Burn': Math.round(calculateAvgBurn(futureCashDeltas)) 
+            inflectionPoint,
+            inputs: {
+                'Gross Cash': currentCash,
+                'Net Liquidity': liquidCash.value,
+                'Cash Burn (Avg)': Math.round(cashBurn),
+                '현금 순유출 시작': inflectionPoint ? inflectionPoint.date : 'N/A',
+                'Start Period': selectedDate
             },
-            formula: 'Cash / Avg Burn (scenario)',
+            formula: 'CASH VIEW: 누적 현금 흐름 순차 소진 모델 (Sequential Cash-Out)',
             period: '시뮬레이션 예측',
             dataSource: 'scenario' as any,
-            monthlyDeltas: scenarioCashFlow.map(cf => ({ date: cf.date, cashDelta: cf.delta }))
+            monthlyDeltas: ssotMetrics.cashflow.map((cf: any) => ({ date: cf.date, cashDelta: cf.delta }))
         };
         const projectedRunway = runway;
-        const liquidityRunway = { ...runway, value: liquidRunwayVal, label: 'Liquidity Runway' };
+        const liquidityRunway = {
+            value: calculateCashRunway(liquidCash.value, cashBurn),
+            inputs: {
+                'Net Liquidity': liquidCash.value,
+                'Cash Burn': Math.round(cashBurn),
+                'Formula': 'Net Liquidity / Cash Burn',
+                '현금 순유출 시작': inflectionPoint ? inflectionPoint.date : 'N/A'
+            },
+            formula: 'CASH VIEW: 순 가용 유동성 / 캐시 번레이트',
+            period: '유동성 기준 런웨이',
+            dataSource: 'scenario' as any,
+            monthlyDeltas: ssotMetrics.cashflow.map((cf: any) => ({ date: cf.date, cashDelta: cf.delta }))
+        };
 
         // 4. Scenario Profit (Simplified)
         const burnMonths = projectionLedger.filter(e => e.date > selectedDate);
         let scenarioProfitTotal = burnMonths.reduce((sum, e) => sum + getProfitDelta(e), 0);
+
+        const scenarioProfit = {
+            value: scenarioProfitTotal,
+            inputs: { '분석 대상 개월 수': Array.from(new Set(burnMonths.map(m => m.date.substring(0, 7)))).length },
+            formula: '시나리오 상의 누적 현금 영향 합계',
+            period: '시뮬레이션 전체 기간',
+            dataSource: 'scenario' as any
+        };
+
+        // [V11 NEW] Burn Bridge: Strategic Compass vs Risk Control gap explanation
+        const historicalPnLData = (scenarioPnL || []).filter(p => p.month <= currentYearMonth);
+        const totalPnLExpenses = historicalPnLData.reduce((sum, p) => sum + (p.cogs + p.payroll + p.marketing + p.rent + p.depreciation + p.misc), 0);
+        const avgOperatingBurnPnL = historicalPnLData.length > 0 ? totalPnLExpenses / historicalPnLData.length : 0;
+
+        const burnBridge = {
+            pnlBurn: Math.round(avgOperatingBurnPnL),
+            cashOut: Math.round(avgOut),
+            diff: Math.round(avgOperatingBurnPnL - avgOut),
+            explanation: Math.round(avgOut) > Math.round(avgOperatingBurnPnL)
+                ? "현금 유출이 손익상 비용보다 큽니다. 선지급, 투자 집행 또는 부채 상환 영향일 수 있습니다."
+                : "손익상 비용이 현금 유출보다 큽니다. 미지급 비용(Accrual) 영향입니다."
+        };
 
         return {
             liquidCash,
@@ -705,15 +774,15 @@ const StrategicCompass: React.FC = () => {
             runway,
             projectedRunway,
             liquidityRunway,
-            scenarioProfit: {
-                value: scenarioProfitTotal,
-                inputs: { '분석 대상 개월 수': Array.from(new Set(burnMonths.map(m => m.date.substring(0, 7)))).length },
-                formula: '시나리오 상의 누적 현금 영향 합계',
-                period: '시뮬레이션 전체 기간',
-                dataSource: 'scenario' as any
-            }
+            cashBurn,
+            burnBreakdown,
+            scenarioProfit,
+            burnBridge
         };
-    }, [financials, trialBalance, projectionLedger, selectedDate, getProfitDelta, scenarioCashFlow, scenarioPnL]);
+    }, [financials, trialBalance, projectionLedger, selectedDate, getProfitDelta, ssotMetrics.cashflow, scenarioPnL]);
+
+    useEffect(() => {
+    }, [metricResults, ssotMetrics]);
 
 
     const stats = useMemo(() => {
@@ -743,7 +812,8 @@ const StrategicCompass: React.FC = () => {
         const drivers = MetricRegistry.analyzeProfitDrivers(baselinePnL, scenarioPnL);
 
         const runwayMonths = metricResults.projectedRunway.value;
-        const currentBurn = metricResults.liquidCash.value / (runwayMonths > 0 ? runwayMonths : 1);
+        const currentBurn = metricResults.cashBurn;
+        const burnBreakdown = metricResults.burnBreakdown || { cashIn: 0, cashOut: 0, netBurn: 0 };
 
         const projectionStatus = MetricRegistry.getProjectionStatus(
             metricResults.projectedRunway.value,
@@ -759,15 +829,29 @@ const StrategicCompass: React.FC = () => {
         const survivalProbResult = MetricRegistry.calculateSurvivalProbability(runwayMonths);
         const survivalScore = survivalProbResult.value;
 
-        const rawInsight = generateCFOInsight({
-            projection: chartData,
-            metrics: {
-                runwayMonths,
-                trajectory,
-                drivers
-            }
+        const pnlBurn = metricResults.burnBridge.pnlBurn;
+        const avgCashOut = metricResults.burnBreakdown.cashOut;
+        const avgCashIn = metricResults.burnBreakdown.cashIn;
+
+        const deterministicInsight = generateCFOInsight({
+            netCashFlow: avgCashIn - avgCashOut,
+            operatingBurn: pnlBurn,
+            cashOut: avgCashOut
         });
-        const insight = rawInsight ? { ...rawInsight, ...INSIGHT_UI_MAP[rawInsight.status] || INSIGHT_UI_MAP['CRITICAL'] } : null;
+
+        const insight = {
+            message: deterministicInsight,
+            status: 'STABLE',
+            bg: 'bg-indigo-500/5',
+            border: 'border-indigo-500/20',
+            color: 'text-indigo-400',
+            Icon: ShieldCheck, // Component, not element
+            label: 'AI Strategic Briefing',
+            reason: [],
+            action: []
+        };
+
+        const bridge = calculateCashVsPLBridge(pnlBurn, avgCashOut);
 
         const projectionResult = {
             value: 0,
@@ -776,9 +860,9 @@ const StrategicCompass: React.FC = () => {
             inputs: {
                 '예측 Runway': `${metricResults.projectedRunway.value.toFixed(1)}개월`,
                 '시뮬레이션 범위': `${chartData.filter(d => d.isFuture).length}개월`,
-                '월간 순손실(적자) 발생 여부': (metricResults.projectedRunway.monthlyDeltas || []).filter((d: any) => d.cashDelta < 0).length > 0 ? 'Yes' : 'No'
+                '월간 현금 유출(순감소) 발생 여부': (metricResults.projectedRunway.monthlyDeltas || []).filter((d: any) => d.cashDelta < 0).length > 0 ? 'Yes' : 'No'
             },
-            formula: 'Runway와 시뮬레이션 종료 시점 간의 여유 기간 기반 상태 판별',
+            formula: '해당 시점부터 현금 유입보다 유출이 커지기 시작하며, 누적 현금이 감소하는 구간을 식별합니다.',
             period: '시나리오 미래 예측',
             dataSource: 'scenario' as any
         };
@@ -806,31 +890,39 @@ const StrategicCompass: React.FC = () => {
             survivalExpl: `현금 생존 기간(Runway) 기준 판정:
 • 95% (안정): Runway 18개월 초과 (투자 유치 직후 등)
 • 85% (양호): Runway 12개월 ~ 18개월
-• 50% (경계): Runway 6개월 ~ 12개월 (현재 ${runwayMonths.toFixed(1)}개월로 이 구간 해당) - '데스밸리 진입' 단계. 통계적으로 추가 투자 유치나 수익 전환이 일어나지 않으면 생존을 장담할 수 없는 반반의 확률로 봅니다.
+• 50% (경계): Runway 6개월 ~ 12개월 (현재 ${runwayMonths.toFixed(1)}개월로 이 구간 해당) - '데스밸리 진입' 단계. 
 • 25% (위험): Runway 3개월 ~ 6개월
-• 10% (부도 위기): Runway 3개월 미만`,
+• 10% (부도 위기): Runway 3개월 미만
+[Note: Cash Burn은 현금 유입/유출이 반영된 순 감소 금액입니다]`,
             insight,
             monthlyBurn: currentBurn,
+            burnBreakdown,
             burnMultiple: burnMultipleResult.value,
             burnMultipleExpl: "미래 성장 효율성 지표입니다. 1원의 추가 매출을 만들기 위해 시뮬레이션상에서 얼마나 많은 현금을 지출(Burn)하는지 나타냅니다. (예상 비용-매출) / 예상 매출",
             projectedRunwayMonths: metricResults.projectedRunway.value,
             projectedRunwayDeltas: metricResults.projectedRunway.monthlyDeltas,
             scenarioHorizonMonths: chartData.filter(d => d.isFuture).length,
+            liquidityRunwayMonths: metricResults.liquidityRunway.value,
+            bridge,
+            // [V12] Unified Strategic KPIs (Beta)
+            strategicKPIs: MetricRegistry.getStrategicKPIs({
+                projectedRunway: metricResults.projectedRunway,
+                liquidityRunway: metricResults.liquidityRunway,
+                projectionResult,
+                burnMultipleResult,
+                burnBridge: metricResults.burnBridge,
+                minCash,
+                breakEvenMonth: breakEvenMonthIndex,
+                cumulativeBreakEvenMonth: null
+            })
         };
+
     }, [metricResults, chartData, selectedDate, projectionLedger, baselinePnL, scenarioPnL]);
 
     const advice = stats?.insight;
     const equitySignal = getEquitySignal(stats?.runwayMonths);
-    const fundingSignal = getFundingTiming(stats?.runwayMonths ?? undefined);
 
     const nowIndex = useMemo(() => chartData.findIndex(d => d.isNow), [chartData]);
-
-    const fundingX = useMemo(() => {
-        if (!fundingSignal || !chartData?.length || nowIndex === -1) return null;
-        const targetIndex = nowIndex + Math.round(fundingSignal.monthOffset);
-        if (targetIndex >= chartData.length || targetIndex < 0) return null;
-        return chartData[targetIndex]?.month;
-    }, [fundingSignal, chartData, nowIndex]);
 
     const cashOutX = useMemo(() => {
         if (!stats?.cashOutMonth || !chartData[stats.cashOutMonth]) return null;
@@ -851,26 +943,75 @@ const StrategicCompass: React.FC = () => {
 
     // 🔥 [FULL PATCH Step 2 & 5] 핵심 로직 (Unified Control SSOT)
     const equityAnalysis = useMemo(() => {
-        if (!stats || !scenarioCashFlow || nowIndex === -1) {
+        if (!stats || !ssotMetrics.cashflow || nowIndex === -1) {
             return null;
         }
 
         // [STEP 1] Do Nothing Scenario: Cash Zero 시점 탐색
-        const failIndex = scenarioCashFlow.findIndex((cf, i) => i >= nowIndex && cf.cash <= 0);
+        const failIndex = ssotMetrics.cashflow.findIndex((cf, i) => i >= nowIndex && cf.cash <= 0);
 
-        // [STEP 2] Funding 시점을 "Runway < 6m" 기준으로 탐색
-        const futureDeltas = scenarioCashFlow.map(cf => cf.delta);
+        // [STEP 2] Dual-Trigger Funding Detection: (Runway < 6m OR Liquidity < 6m)
+        const futureDeltas = ssotMetrics.cashflow.map(cf => cf.delta);
+        const liquidOffset = stats.liquidCash.value - financials.cash;
         let fundingIndex = -1;
         let fundingRemainingRunway = 0;
+        let fundingReason: 'LIQUIDITY' | 'RUNWAY' | null = null;
 
-        for (let i = nowIndex; i < scenarioCashFlow.length; i++) {
-            const remRunway = calculateRunway({
-                currentCash: scenarioCashFlow[i].cash,
-                futureCashDeltas: futureDeltas.slice(i)
+        // 🔴 [STEP 0] 현재 기준 Funding Trigger (최우선 — 미래 루프보다 먼저 판단)
+        const currentRunway = stats.runwayMonths;
+        const currentLiquidityRunway = stats.liquidityRunwayMonths;
+        const isCurrentlyDangerous =
+            (currentRunway !== undefined && currentRunway < 6) ||
+            (currentLiquidityRunway !== undefined && currentLiquidityRunway < 6);
+
+        if (isCurrentlyDangerous) {
+            const avgBurnNow = calculateCashBurn(futureDeltas) || 1;
+            // 더 짧은 쪽 기준으로 펀딩 계산
+            const worstRunway = Math.min(
+                currentRunway ?? Infinity,
+                currentLiquidityRunway ?? Infinity
+            );
+            const fundingNeededNow = requiredFunding(worstRunway, 18, avgBurnNow);
+            const dilutionNow = calculateDilution(preMoneyValuation || 500000000, fundingNeededNow);
+            return {
+                failIndex,
+                fundingNeeded: fundingNeededNow,
+                fundingIndex: nowIndex,
+                fundingRemainingRunway: worstRunway,
+                fundingRunwayAtEvent: worstRunway,
+                dilution: dilutionNow,
+                delayAnalysis: null,
+                control: report.controlState,
+                timing: analyzeFundingTiming({ runwayMonths: worstRunway }),
+                insight: generateEquityInsight({
+                    runway: worstRunway,
+                    dilution: dilutionNow,
+                    control: report.controlState,
+                    timing: analyzeFundingTiming({ runwayMonths: worstRunway })
+                }),
+                fundingReason: 'LIQUIDITY' as const
+            };
+        }
+
+        for (let i = nowIndex; i < ssotMetrics.cashflow.length; i++) {
+            const currentItem = ssotMetrics.cashflow[i];
+            const futureSlice = futureDeltas.slice(i);
+
+            // 1. Long-term (Sequential)
+            const remRunway = calculateSequentialRunway({
+                currentCash: currentItem.cash,
+                futureCashDeltas: futureSlice
             });
-            if (remRunway < 6) {
+
+            // 2. Short-term (Liquidity based on Avg Burn)
+            const remLiquidCash = currentItem.cash + liquidOffset;
+            const avgBurn = calculateCashBurn(futureSlice) || 1;
+            const remLiquidRunway = remLiquidCash / avgBurn;
+
+            if (remLiquidRunway < 6 || remRunway < 6) {
                 fundingIndex = i;
-                fundingRemainingRunway = remRunway;
+                fundingRemainingRunway = Math.min(remRunway, remLiquidRunway);
+                fundingReason = remLiquidRunway < 6 ? 'LIQUIDITY' : 'RUNWAY';
                 break;
             }
         }
@@ -880,24 +1021,26 @@ const StrategicCompass: React.FC = () => {
                 failIndex,
                 fundingNeeded: 0,
                 fundingIndex: -1,
+                fundingRunwayAtEvent: null,
                 dilution: null,
                 delayAnalysis: null,
                 control: report.controlState,
                 timing: null,
-                insight: null
+                insight: null,
+                fundingReason: null
             };
         }
 
-        // [STEP 3] Funding Amount도 "그 시점(fundingIndex)" 기준으로 산출
+        // [STEP 3] Funding Amount calc
         const futureBurnMonths = futureDeltas.slice(fundingIndex).filter(d => d < 0);
-        const avgBurn = futureBurnMonths.length > 0
+        const fbAvgBurn = futureBurnMonths.length > 0
             ? futureBurnMonths.reduce((a, b) => a + Math.abs(b), 0) / futureBurnMonths.length
             : 0;
 
         const fundingNeeded = requiredFunding(
             fundingRemainingRunway,
-            18, // Target Runway 18m
-            avgBurn
+            18,
+            fbAvgBurn
         );
 
         const dilution = calculateDilution(
@@ -905,13 +1048,27 @@ const StrategicCompass: React.FC = () => {
             fundingNeeded
         );
 
-        // [STEP 4] Timing Sensitivity: 3개월 지연 시 영향 분석
+        const controlReport = analyzeEquityControl(
+            preMoneyValuation || 500000000,
+            fundingNeeded
+        );
+
+        const control = controlReport.controlState;
+        const timing = analyzeFundingTiming({ runwayMonths: fundingRemainingRunway });
+        const insight = generateEquityInsight({
+            runway: fundingRemainingRunway,
+            dilution,
+            control,
+            timing
+        });
+
+        // [STEP 4] Timing Sensitivity (Restore for UI)
         let delayAnalysis = null;
         const delayGap = 3;
-        if (fundingIndex + delayGap < scenarioCashFlow.length) {
+        if (fundingIndex + delayGap < ssotMetrics.cashflow.length) {
             const di = fundingIndex + delayGap;
-            const dRemRunway = calculateRunway({
-                currentCash: scenarioCashFlow[di].cash,
+            const dRemRunway = calculateSequentialRunway({
+                currentCash: ssotMetrics.cashflow[di].cash,
                 futureCashDeltas: futureDeltas.slice(di)
             });
             const dBurnMonths = futureDeltas.slice(di).filter(d => d < 0);
@@ -926,45 +1083,28 @@ const StrategicCompass: React.FC = () => {
                 date: chartData[di]?.month,
                 fundingNeeded: dFundingNeeded,
                 investorShare: dDilution.investorShare,
-                dilutionDelta: dDilution.investorShare - dilution.investorShare
+                dilutionDelta: dDilution.investorShare - (dilution?.investorShare || 0)
             };
         }
-
-        const controlReport = analyzeEquityControl(
-            preMoneyValuation || 500000000,
-            fundingNeeded
-        );
-
-        const control = controlReport.controlState;
-
-        const timing = analyzeFundingTiming({
-            runwayMonths: fundingRemainingRunway
-        });
-
-        const insight = generateEquityInsight({
-            runway: fundingRemainingRunway,
-            dilution,
-            control,
-            timing
-        });
 
         return {
             failIndex,
             fundingNeeded,
             fundingIndex,
             fundingRemainingRunway,
+            fundingRunwayAtEvent: fundingRemainingRunway,
             dilution,
             delayAnalysis,
             control,
             timing,
-            insight
+            insight,
+            fundingReason
         };
-    }, [stats, preMoneyValuation, scenarioCashFlow, nowIndex, report.controlState, chartData]);
+    }, [stats, preMoneyValuation, ssotMetrics.cashflow, nowIndex, report.controlState, financials.cash, chartData]);
 
     // 🔥 [V2.6 FIX] Sync Simulation Result to Manual Simulator
     useEffect(() => {
         if (equityAnalysis?.fundingNeeded && investmentAmount === 0) {
-            console.log("[Equity] Syncing suggested funding to simulator:", equityAnalysis.fundingNeeded);
             setInvestmentAmount(equityAnalysis.fundingNeeded);
         }
     }, [equityAnalysis?.fundingNeeded, setInvestmentAmount]);
@@ -973,7 +1113,7 @@ const StrategicCompass: React.FC = () => {
         const requiredFundingVal = equityAnalysis?.fundingNeeded;
         if (!requiredFundingVal || requiredFundingVal <= 0) return null;
 
-        const postMoney = preMoneyValuation + requiredFundingVal;
+        const postMoney = (preMoneyValuation || 500000000) + requiredFundingVal;
         const investorShare = requiredFundingVal / postMoney;
         const founderShare = 1 - investorShare;
 
@@ -1013,9 +1153,22 @@ const StrategicCompass: React.FC = () => {
             date: chartData[idx]?.month,
             failDate: equityAnalysis.failIndex !== -1 ? chartData[equityAnalysis.failIndex]?.month : null,
             fundingNeeded: equityAnalysis.fundingNeeded,
-            remainingRunway: equityAnalysis.fundingRemainingRunway
+            remainingRunway: equityAnalysis.fundingRemainingRunway,
+            reason: equityAnalysis.fundingReason
         };
     }, [chartData, equityAnalysis]);
+
+    const fundingX = useMemo(() => {
+        return fundingEvent?.date || null;
+    }, [fundingEvent]);
+
+    const fundingSignal = useMemo(() => {
+        if (!fundingEvent) return null;
+        if (fundingEvent.reason === 'LIQUIDITY') {
+            return { label: '🔴 Funding Needed (Liquidity Risk)', color: '#ef4444' };
+        }
+        return { label: '🟡 Funding Needed (Runway Alert)', color: '#f59e0b' };
+    }, [fundingEvent]);
 
     const controlRunwayState = useMemo(() => {
         const runway = stats?.runwayMonths;
@@ -1045,10 +1198,10 @@ const StrategicCompass: React.FC = () => {
         let found = null;
         for (let i = 0; i < chartData.length; i++) {
             // [V2.6] Cumulative Payback includes all income (grants, etc.)
-            runningSum += chartData[i].ScenarioNetIncome || chartData[i].ActualProfit; 
+            runningSum += chartData[i].ScenarioNetIncome || chartData[i].ActualProfit;
             if (runningSum >= 0 && i > nowIndex) {
-                 found = chartData[i];
-                 break;
+                found = chartData[i];
+                break;
             }
         }
         if (!found) return null;
@@ -1065,6 +1218,7 @@ const StrategicCompass: React.FC = () => {
                     </div>
                     <div>
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
+                            <span className="text-[10px] font-black text-white bg-emerald-500 px-3 py-1 rounded-full uppercase tracking-widest shadow-lg shadow-emerald-500/20">CASH VIEW → 현금 흐름 기반 분석</span>
                             <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-blue-500/20">실험적 전략 모드 (Experimental)</span>
                             {anchorValidation?.isValid ? (
                                 <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-emerald-500/20 flex items-center gap-1">
@@ -1117,7 +1271,7 @@ const StrategicCompass: React.FC = () => {
             <div className="flex flex-col gap-6">
                 {/* CFO Insight - Moved to Top for immediate visibility */}
                 <section className={`${advice?.bg ?? "bg-slate-500/10"} border-2 ${advice?.border ?? "border-slate-500/20"} p-6 h-auto rounded-[3rem] relative overflow-hidden shadow-2xl`}>
-                    <div className="absolute right-[-20px] top-[-20px] opacity-5 text-current transform rotate-12">
+                    <div className="absolute right-[-20px] top-[-20px] opacity-5 text-current transform rotate-12 pointer-events-none">
                         {advice && advice.Icon && (
                             <advice.Icon size={180} />
                         )}
@@ -1151,116 +1305,206 @@ const StrategicCompass: React.FC = () => {
                                             <span className={`${advice?.color} opacity-40`}>•</span> {r}
                                         </li>
                                     ))}
-                                    {(!advice?.reason || advice.reason.length === 0) && <li className="text-xs text-slate-600 font-bold italic">특이 사항 없음</li>}
+                                    {(!advice?.reason || advice.reason.length === 0) && (
+                                        <li className="text-[10px] text-slate-600 italic">분석 대기 중...</li>
+                                    )}
                                 </ul>
                             </div>
-                            <div className="space-y-3">
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                    <Zap size={14} /> Actions
-                                </p>
-                                <div className="flex gap-2">
-                                    {advice?.action.slice(0, 2).map((a: string, i: number) => (
-                                        <span key={i} className="px-3 py-1.5 bg-white/5 border border-white/5 rounded-lg text-[10px] font-black text-slate-200 italic">
-                                            {a}
-                                        </span>
-                                    ))}
-                                    {(!advice?.action || advice.action.length === 0) && <span className="text-xs text-slate-600 font-bold italic">전략 유지</span>}
-                                </div>
+
+                            <div className="flex flex-col gap-3">
+                                <ExplainableKPI
+                                    label={`${stats?.burnBreakdown?.isBurning ? "🔥 월간 현금 소진액" : "💰 월간 현금 창출액"} (최근 ${stats?.burnBreakdown?.window ?? 6}개월 기준)`}
+                                    result={{
+                                        value: Math.abs(stats?.burnBreakdown?.netCashAvg ?? 0),
+                                        inputs: {
+                                            'Operating Cash In (Avg)': Math.round(stats?.burnBreakdown?.cashIn || 0),
+                                            'Financing Inflow (Total)': Math.round(stats?.burnBreakdown?.financingIn || 0),
+                                            'Cash Out (Avg)': Math.round(stats?.burnBreakdown?.cashOut || 0),
+                                            'Net Result': Math.round(stats?.burnBreakdown?.netCashAvg ?? 0)
+                                        },
+                                        formula: `CASH VIEW: 최근 ${stats?.burnBreakdown?.window ?? 6}개월 평균 영업 현금 유입(투자 제외) - 유출`,
+                                        period: `최근 ${stats?.burnBreakdown?.window ?? 6}개월 평균`,
+                                        dataSource: 'scenario'
+                                    }}
+                                    description={stats?.burnBreakdown?.isBurning
+                                        ? "지출이 매출보다 많아 현금이 줄어들고 있는 상태입니다. 런웨이 확보가 필요합니다."
+                                        : "매출이 지출보다 많아 현금이 늘어나고 있는 상태입니다. (투자 제외 순수 영업 기반 흑자)"
+                                    }
+                                    color={stats?.burnBreakdown?.isBurning ? "text-rose-500" : "text-emerald-400"}
+                                    formatValue={(v) => (
+                                        <div className="flex flex-col gap-2">
+                                            <div className="flex justify-between items-end">
+                                                <span className={`text-xl font-black ${stats?.burnBreakdown?.isBurning ? "text-rose-500" : "text-emerald-400"} tracking-tighter italic`}>{formatCurrency(v)}</span>
+                                                <span className={`text-[8px] ${stats?.burnBreakdown?.isBurning ? "text-rose-500/60" : "text-emerald-500/60"} font-black uppercase tracking-widest`}>
+                                                    ({stats?.burnBreakdown?.isBurning ? 'NET BURN' : 'NET GENERATION'})
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-white/10 pt-3 mt-2">
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Operating In:</span>
+                                                <span className="text-[11px] font-black text-slate-200 text-right">+{formatCurrency(Math.round(stats?.burnBreakdown?.cashIn || 0))}</span>
+
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Cash Out:</span>
+                                                <span className="text-[11px] font-black text-rose-400 text-right">
+                                                    -{formatCurrency(Math.round(stats?.burnBreakdown?.cashOut || 0))}
+                                                </span>
+
+                                                {(stats?.burnBreakdown?.financingIn ?? 0) > 0 && (
+                                                    <>
+                                                        <span className="text-[10px] font-black text-blue-500/80 uppercase tracking-tighter">Financing In:</span>
+                                                        <span className="text-[11px] font-black text-blue-400 text-right">+{formatCurrency(Math.round(stats?.burnBreakdown?.financingIn || 0))}</span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                />
                             </div>
                         </div>
                     </div>
                 </section>
 
-                {/* Row 2: KPI Summary - Compressed vertical space */}
-                <div className="grid grid-cols-2 lg:grid-cols-8 gap-4">
-                    <ExplainableKPI
-                        label="번 멀티플 (Burn Multiple)"
-                        result={stats?.burnMultipleResult || null}
-                        description={stats?.burnMultipleExpl ?? ""}
-                        color={(stats?.burnMultiple ?? 0) <= 1.5 ? 'text-emerald-400' : 'text-rose-400'}
-                        formatValue={(v) => `${v.toFixed(1)}x`}
-                    />
-                    <ExplainableKPI
-                        label="현금 생존 기간 (RUNWAY)"
-                        result={stats?.projectedRunway || null}
-                        description="미래 시나리오를 가미했을 때의 유동성 상태입니다."
-                        color={(stats?.projectedRunwayMonths ?? 0) >= 12 ? 'text-emerald-400' : 'text-rose-400'}
-                        formatValue={(v) => v === Infinity ? "무한" : `${v.toFixed(1)}개월`}
-                    />
-                    <ExplainableKPI
-                        label="유동성 런웨이 (Liquidity Runway)"
-                        result={stats?.liquidityRunway || null}
-                        description="미지급금을 차감한 순 가용 유동성 기준의 런웨이입니다. (V2.6 SSOT)"
-                        color={(stats?.liquidityRunway?.value ?? 0) >= 6 ? 'text-blue-400' : 'text-rose-400'}
-                        formatValue={(v) => v === Infinity ? "무한" : `${v.toFixed(1)}개월`}
-                    />
-                    <ExplainableKPI
-                        label="생존 상태 (Projection)"
-                        result={stats?.projectionResult || null}
-                        description="시나리오 결과에 따른 예측 상태입니다."
-                        color={stats?.deathValleyRisk === 'SAFE' ? 'text-emerald-400' : 'text-rose-400'}
-                        formatValue={(v) => stats?.projectionResult?.label || "UNKNOWN"}
-                    />
-                    <ExplainableKPI
-                        label="월간 흑자 전환 (Monthly BEP)"
-                        result={{
-                            value: stats?.breakEvenMonth || 0,
-                            inputs: { '분석 대상 개월수': projectionMonths, '현재 월 순이익': stats?.actualNetProfit.value || 0 },
-                            formula: '시나리오 월간 수익이 처음으로 0보다 커지는 시점 탐색',
-                            period: '전체 분석 시계',
-                            dataSource: 'scenario'
-                        }}
-                        description="월간 수익(Revenue)이 운영 비용(OPEX)을 처음으로 넘어서는 시점입니다. 이 시점부터 외부 자금 수혈 없이 자립이 가능해집니다."
-                        color="text-indigo-400"
-                        formatValue={(v) => breakEvenMonth || "N/A"}
-                    />
-                    <ExplainableKPI
-                        label="누적 투자 회수 (Cumulative BEP)"
-                        result={{
-                            value: 0,
-                            inputs: { '분석 기간': projectionMonths },
-                            formula: 'Σ(과거 실적 + 미래 예측) >= 0이 되는 시점',
-                            period: 'Life-to-Date',
-                            dataSource: 'scenario'
-                        }}
-                        description="창업 이후 발생한 모든 누적 손실을 만회하고 법인이 실질적인 순자산 증가 구간에 진입하는 시점입니다. (v2.6 신설)"
-                        color="text-purple-400"
-                        formatValue={(v) => cumulativeBreakEvenMonth || "N/A"}
-                    />
-                    <ExplainableKPI
-                        label="데스밸리 리스크 (Debt Valley)"
-                        result={{
-                            value: stats?.minCash || 0,
-                            inputs: { '최저 예상 잔액': stats?.minCash || 0, '현재 Runway': stats?.runwayMonths || 0 },
-                            formula: '전체 시뮬레이션 기간 중 가장 낮은 현금 잔액 탐색',
-                            period: '36개월 분석 범위',
-                            dataSource: 'scenario'
-                        }}
-                        description={stats?.deathValleyExpl ?? ""}
-                        color={stats?.deathValleyRisk === 'SAFE' ? 'text-emerald-400' : 'text-rose-400'}
-                        formatValue={(v) => stats?.deathValleyRisk || "SAFE"}
-                    />
-                    <ExplainableKPI
-                        label="스타트업 생존 확률"
-                        result={stats?.survivalProbResult || null}
-                        description={stats?.survivalExpl ?? ""}
-                        color={(stats?.survivalProbability ?? 0) >= 70 ? 'text-emerald-400' : (stats?.survivalProbability ?? 0) >= 40 ? 'text-amber-400' : 'text-rose-400'}
-                        formatValue={(v) => `${v}%`}
-                        icon={<SurvivalGauge value={stats?.survivalProbability ?? 0} />}
-                    />
-                    <ExplainableKPI
-                        label="현금 고갈 시점 예측"
-                        result={{
-                            value: stats?.cashOutMonth || 0,
-                            inputs: { '기준 일자': selectedDate, '가용 현금 잔액': stats?.liquidCash.value || 0 },
-                            formula: '누적 시나리오 현금이 처음으로 0 미만이 되는 시점',
-                            period: '고갈 타임라인',
-                            dataSource: 'scenario'
-                        }}
-                        description={`현재 지출 및 매출 추세 기반으로 예상되는 현금 고갈 월입니다. ${stats?.cashOutMonth !== null && stats?.cashOutMonth !== undefined ? `${stats.cashOutMonth}개월 후 고갈이 예측됩니다.` : '현재 시뮬레이션 기간 내 고갈 위험이 발견되지 않았습니다.'}`}
-                        color={(stats?.cashOutMonth ?? 100) < 12 ? 'text-rose-400' : 'text-emerald-400'}
-                        formatValue={(v) => stats?.cashOutDateLabel || "N/A"}
-                    />
+                <div className="space-y-12 pb-20">
+                    {/* [V12] PRIMARY STRATEGIC KPIs - The "Big 4" */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <ExplainableKPI
+                            label="💸 현금 버티는 기간"
+                            result={stats?.liquidityRunway || null}
+                            description="최근 6개월 평균 기준 (보수적)"
+                            color={(stats?.liquidityRunway?.value ?? 0) >= 6 ? 'text-blue-400' : 'text-rose-400'}
+                            formatValue={(v) => v === Infinity ? "∞ (현금 증가 상태)" : (
+                                <div className="flex flex-col">
+                                    <span className="text-xl font-black italic tracking-tighter">{v.toFixed(1)}개월</span>
+                                    <span className="text-[10px] opacity-60 font-medium not-italic tracking-normal mt-0.5">(현재 가용 현금 기준)</span>
+                                </div>
+                            )}
+                        />
+                        <ExplainableKPI
+                            label="📈 전략 생존 기간"
+                            result={stats?.projectedRunway || null}
+                            description="성장 반영 시뮬레이션 기준"
+                            color={(stats?.projectedRunway?.value ?? 0) >= 12 ? 'text-emerald-400' : 'text-rose-400'}
+                            formatValue={(v) => v === Infinity ? "∞ (현금 증가 상태)" : (
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xl font-black italic tracking-tighter">
+                                            {v.toFixed(1)}개월
+                                        </span>
+                                        <div className={`px-2 py-0.5 rounded-full border text-[9px] font-black tracking-tighter ${stats?.deathValleyRisk === 'SAFE' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
+                                            {stats?.projectionResult?.label || "UNKNOWN"}
+                                        </div>
+                                    </div>
+                                    {stats?.projectedRunway?.inflectionPoint && (
+                                        <div className="mt-1 flex flex-col">
+                                            <span className="text-[12px] font-black text-rose-400/80 uppercase tracking-widest flex items-center gap-1 animate-pulse">
+                                                📉 {stats.projectedRunway.inflectionPoint.monthsOffset}개월 후 순현금흐름 0 도달 (마진 소멸)
+                                            </span>
+                                            <span className="text-[11px] text-slate-500 font-bold ml-4">
+                                                ({stats.projectedRunway.inflectionPoint.date}부터 현금 유출 가속)
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        />
+                        <ExplainableKPI
+                            label="월간 흑자 전환 (Monthly BEP)"
+                            result={{
+                                value: stats?.breakEvenMonth || 0,
+                                inputs: { '분석 대상 개월수': projectionMonths, '현재 월 순이익': stats?.actualNetProfit.value || 0 },
+                                formula: '시나리오 월간 수익이 처음으로 0보다 커지는 시점 탐색',
+                                period: '전체 분석 시계',
+                                dataSource: 'scenario'
+                            }}
+                            description="월간 수익(Revenue)이 운영 비용(OPEX)을 처음으로 넘어서는 시점입니다. 이 시점부터 외부 자금 수혈 없이 자립이 가능해집니다."
+                            color="text-indigo-400"
+                            formatValue={(v) => stats?.breakEvenMonth ? `${stats.breakEvenMonth}개월` : "N/A"}
+                        />
+                        <ExplainableKPI
+                            label="번 멀티플 (Burn Multiple)"
+                            result={stats?.burnMultipleResult || null}
+                            description={stats?.burnMultipleExpl ?? ""}
+                            color={(stats?.burnMultiple ?? 0) <= 1.5 ? 'text-emerald-400' : 'text-rose-400'}
+                            formatValue={(v) => v === 0 ? "0.0x (Profitable)" : v === Infinity ? "N/A (Growth Only)" : `${v.toFixed(1)}x`}
+                        />
+                    </div>
+
+                    {/* [V12] SECONDARY ANALYTICAL KPIs - Deep Dive */}
+                    <div className="pt-8 border-t border-white/5">
+                         <div className="flex items-center gap-3 mb-6">
+                            <div className="px-3 py-1 bg-white/5 border border-white/10 rounded-full">
+                                <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest italic">🔍 DIAGNOSTIC DEEP-DIVE</span>
+                            </div>
+                            <p className="text-[12px] text-slate-500 font-bold">건전성 및 리스크 상세 분석 지표입니다.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            <ExplainableKPI
+                                label="🔗 Burn Bridge (Cash vs P&L)"
+                                result={{
+                                    value: stats?.burnBridge?.diff || 0,
+                                    inputs: {
+                                        'Operating Burn (P&L)': formatCurrency(stats?.burnBridge?.pnlBurn || 0),
+                                        'Cash Out (Actual)': formatCurrency(stats?.burnBridge?.cashOut || 0),
+                                        'Status': stats?.burnBridge?.explanation || ""
+                                    },
+                                    formula: 'Operating Burn (P&L) - Cash Out (Cash)',
+                                    period: 'Historical Average',
+                                    dataSource: 'actual'
+                                }}
+                                description="손익계산서상의 비용과 실제 통장에서 나가는 현금의 차이를 분석합니다."
+                                color="text-amber-400"
+                                formatValue={(v) => (
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-[13px] font-black text-amber-400 italic">
+                                            {`Gap: ₩${Math.round((v || 0) / 1000000)}M`}
+                                        </span>
+                                        <span className="text-[11px] text-slate-500 font-bold leading-tight">
+                                            손익과 현금 유출의 괴리 분석
+                                        </span>
+                                    </div>
+                                )}
+                            />
+                            <ExplainableKPI
+                                label="누적 투자 회수 (Cumulative BEP)"
+                                result={{
+                                    value: 0,
+                                    inputs: { '분석 기간': projectionMonths },
+                                    formula: 'Σ(과거 실적 + 미래 예측) >= 0이 되는 시점',
+                                    period: 'Life-to-Date',
+                                    dataSource: 'scenario'
+                                }}
+                                description="창업 이후 모든 누적 손실을 만회하고 법인이 실질적인 순자산 증가 구간에 진입하는 시점입니다."
+                                color="text-purple-400"
+                                formatValue={(v) => cumulativeBreakEvenMonth || "N/A"}
+                            />
+                            <ExplainableKPI
+                                label="현금 고갈 시점 예측"
+                                result={{
+                                    value: stats?.cashOutMonth || 0,
+                                    inputs: { '기준 일자': selectedDate, '가용 현금 잔액': stats?.liquidCash.value || 0 },
+                                    formula: '누적 시나리오 현금이 처음으로 0 미만이 되는 시점',
+                                    period: '고갈 타임라인',
+                                    dataSource: 'scenario'
+                                }}
+                                description="현재 지출 및 매출 추세 기반으로 예상되는 현금 고갈 월입니다."
+                                color={(stats?.cashOutMonth ?? 100) < 12 ? 'text-rose-400' : 'text-emerald-400'}
+                                formatValue={(v) => stats?.cashOutDateLabel || "N/A"}
+                            />
+                            <ExplainableKPI
+                                label="펀딩 필요 시점 (Funding)"
+                                result={{
+                                    value: stats?.cashOutMonth || 0,
+                                    inputs: { 'Threshold': 'Runway < 6개월' },
+                                    formula: '미래 시점별 예상 Runway를 실시간 계산하여 6개월 미만으로 떨어지는 최초의 시점 탐색',
+                                    period: '자금 조달 골든타임',
+                                    dataSource: 'scenario'
+                                }}
+                                description="현금이 완전히 바닥나기 전, 자금 조달을 시작해야 하는 '골든타임'입니다."
+                                color="text-amber-400"
+                                formatValue={(v) => fundingEvent?.date || "N/A"}
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 {/* Main Interactive Simulation Zone - Refined 10-Column Pattern */}
@@ -1482,241 +1726,280 @@ const StrategicCompass: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="h-[600px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart
-                                        data={chartData}
-                                        margin={{ top: 60, right: 30, left: 0, bottom: 0 }}
-                                    >
-                                        <defs>
-                                            <linearGradient id="colorCash" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
-                                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                            </linearGradient>
-                                        </defs>
-                                        <Legend
-                                            verticalAlign="bottom"
-                                            height={64}
-                                            align="center"
-                                            iconType="circle"
-                                            itemSorter={(item: any) => {
-                                                const order: Record<string, number> = {
-                                                    '실제 영업이익': 1,
-                                                    '베이스라인 영업이익': 2,
-                                                    '시나리오 영업이익': 3,
-                                                    '베이스라인 현금 (Macro)': 4,
-                                                    '시나리오 현금 (Strategy)': 5
-                                                };
-                                                return order[item.value] || 99;
-                                            }}
-                                            formatter={(value: string) => {
-                                                const isProfit = value.includes('영업이익');
-                                                const icon = isProfit ? '📈' : '💰';
-                                                const colorClass = isProfit ? 'text-blue-400/90' : 'text-emerald-400/90';
-                                                return (
-                                                    <span className={`text-[10px] font-black ${colorClass} flex items-center gap-1.5 uppercase tracking-widest px-2 py-1 bg-white/5 rounded-lg border border-white/5 ml-2`}>
-                                                        <span className="text-xs">{icon}</span> {value}
-                                                    </span>
-                                                );
-                                            }}
-                                        />
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                                        <XAxis
-                                            dataKey="month"
-                                            stroke="#475569"
-                                            fontSize={10}
-                                            fontWeight="black"
-                                            axisLine={false}
-                                            tickLine={false}
-                                            interval={2}
-                                        />
-                                        <YAxis
-                                            yAxisId="cash"
-                                            orientation="left"
-                                            stroke="#10b981"
-                                            fontSize={10}
-                                            fontWeight="black"
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tickFormatter={(val: number) => `₩${(val / 1_000_000).toFixed(0)}M`}
-                                        />
-                                        <YAxis
-                                            yAxisId="pnl"
-                                            orientation="right"
-                                            stroke="#3b82f6"
-                                            fontSize={10}
-                                            fontWeight="black"
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tickFormatter={(val: number) => `₩${(val / 1_000_000).toFixed(1)}M`}
-                                        />
-                                        <Tooltip content={<CustomChartTooltip stats={stats} />} />
-
-                                        {chartData.some(d => !d.isFuture) && (
-                                            <ReferenceLine
-                                                yAxisId="cash"
-                                                x={selectedDate.substring(2, 7).replace('-', '/')}
+                            <div className="h-[600px] relative overflow-hidden">
+                                <div className="relative w-full h-full">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart
+                                            data={chartData}
+                                            margin={{ top: 60, right: 30, left: 0, bottom: 0 }}
+                                        >
+                                            <defs>
+                                                <linearGradient id="colorCash" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <Legend
+                                                verticalAlign="bottom"
+                                                height={64}
+                                                align="center"
+                                                iconType="circle"
+                                                itemSorter={(item: any) => {
+                                                    const order: Record<string, number> = {
+                                                        '실제 영업이익': 1,
+                                                        '베이스라인 영업이익': 2,
+                                                        '시나리오 영업이익': 3,
+                                                        '베이스라인 현금 (Macro)': 4,
+                                                        '시나리오 현금 (Strategy)': 5
+                                                    };
+                                                    return order[item.value] || 99;
+                                                }}
+                                                formatter={(value: string) => {
+                                                    const isProfit = value.includes('영업이익');
+                                                    const icon = isProfit ? '📈' : '💰';
+                                                    const colorClass = isProfit ? 'text-blue-400/90' : 'text-emerald-400/90';
+                                                    return (
+                                                        <span className={`text-[10px] font-black ${colorClass} flex items-center gap-1.5 uppercase tracking-widest px-2 py-1 bg-white/5 rounded-lg border border-white/5 ml-2`}>
+                                                            <span className="text-xs">{icon}</span> {value}
+                                                        </span>
+                                                    );
+                                                }}
+                                            />
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                                            <XAxis
+                                                dataKey="month"
                                                 stroke="#475569"
+                                                fontSize={10}
+                                                fontWeight="black"
+                                                axisLine={false}
+                                                tickLine={false}
+                                                interval={2}
+                                            />
+                                            <YAxis
+                                                yAxisId="cash"
+                                                orientation="left"
+                                                stroke="#10b981"
+                                                fontSize={10}
+                                                fontWeight="black"
+                                                axisLine={false}
+                                                tickLine={false}
+                                                tickFormatter={(val: number) => `₩${(val / 1_000_000).toFixed(0)}M`}
+                                            />
+                                            <YAxis
+                                                yAxisId="pnl"
+                                                orientation="right"
+                                                stroke="#3b82f6"
+                                                fontSize={10}
+                                                fontWeight="black"
+                                                axisLine={false}
+                                                tickLine={false}
+                                                tickFormatter={(val: number) => `₩${(val / 1_000_000).toFixed(1)}M`}
+                                            />
+                                            <Tooltip
+                                                content={<CustomChartTooltip stats={stats} />}
+                                                contentStyle={{ pointerEvents: 'auto' }}
+                                            />
+
+                                            {chartData.some(d => !d.isFuture) && (
+                                                <ReferenceLine
+                                                    yAxisId="cash"
+                                                    x={selectedDate.substring(2, 7).replace('-', '/')}
+                                                    stroke="#475569"
+                                                    strokeWidth={2}
+                                                    strokeDasharray="3 3"
+                                                    label={{ value: 'NOW', position: 'top', fill: '#475569', fontSize: 10, fontWeight: 900 }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+
+                                            {chartData.some(d => d.isFuture) && (
+                                                <ReferenceArea
+                                                    yAxisId="cash"
+                                                    x1={selectedDate.substring(2, 7).replace('-', '/')}
+                                                    x2={chartData[chartData.length - 1].month}
+                                                    fill="#ffffff"
+                                                    fillOpacity={0.03}
+                                                />
+                                            )}
+
+                                            <Area
+                                                yAxisId="cash"
+                                                type="monotone"
+                                                dataKey="BaselineCash"
+                                                name="베이스라인 현금 (Macro)"
+                                                stroke="#10b98166"
+                                                fillOpacity={0}
                                                 strokeWidth={2}
-                                                strokeDasharray="3 3"
-                                                label={{ value: 'NOW', position: 'top', fill: '#475569', fontSize: 10, fontWeight: 900 }}
-                                            />
-                                        )}
-
-                                        {chartData.some(d => d.isFuture) && (
-                                            <ReferenceArea
-                                                yAxisId="cash"
-                                                x1={selectedDate.substring(2, 7).replace('-', '/')}
-                                                x2={chartData[chartData.length - 1].month}
-                                                fill="#ffffff"
-                                                fillOpacity={0.03}
-                                            />
-                                        )}
-
-                                        <Area
-                                            yAxisId="cash"
-                                            type="monotone"
-                                            dataKey="BaselineCash"
-                                            name="베이스라인 현금 (Macro)"
-                                            stroke="#10b98166"
-                                            fillOpacity={0}
-                                            strokeWidth={2}
-                                            strokeDasharray="6 6"
-                                            animationDuration={1000}
-                                        />
-                                        <Area
-                                            yAxisId="cash"
-                                            type="monotone"
-                                            dataKey="ScenarioCash"
-                                            name="시나리오 현금 (Strategy)"
-                                            stroke="#10b981"
-                                            fillOpacity={1}
-                                            fill="url(#colorCash)"
-                                            strokeWidth={4}
-                                            animationDuration={1500}
-                                            animationEasing="ease-in-out"
-                                        />
-
-                                        <Line
-                                            yAxisId="pnl"
-                                            type="monotone"
-                                            dataKey="ActualProfit"
-                                            name="실제 영업이익"
-                                            stroke="#ffffff88"
-                                            strokeWidth={3}
-                                            dot={false}
-                                            animationDuration={1000}
-                                        />
-                                        {fundingEvent && (
-                                            <ReferenceLine
-                                                x={fundingEvent.date}
-                                                stroke="#ef4444"
-                                                strokeWidth={3}
                                                 strokeDasharray="6 6"
-                                                label={{
-                                                    value: `Runway < 6m → Funding (${fundingEvent.remainingRunway?.toFixed(1)}m)`,
-                                                    position: "top",
-                                                    fill: "#ef4444",
-                                                    fontSize: 10,
-                                                    fontWeight: 900
-                                                }}
+                                                animationDuration={1000}
                                             />
-                                        )}
-                                        {fundingEvent && fundingEvent.failDate && (
-                                            <ReferenceLine
-                                                x={fundingEvent.failDate}
-                                                stroke="#ff0000"
-                                                strokeWidth={3}
-                                                strokeDasharray="3 3"
-                                                label={{
-                                                    value: `CASH ZERO (FAILURE) 💀`,
-                                                    position: "bottom",
-                                                    fill: "#ff0000",
-                                                    fontSize: 10,
-                                                    fontWeight: 900
-                                                }}
-                                            />
-                                        )}
-                                        <Line
-                                            yAxisId="pnl"
-                                            type="monotone"
-                                            dataKey="BaselineProfit"
-                                            name="베이스라인 영업이익"
-                                            stroke="#3b82f666"
-                                            strokeWidth={2}
-                                            strokeDasharray="4 4"
-                                            dot={false}
-                                            animationDuration={1200}
-                                        />
-                                        <Line
-                                            yAxisId="pnl"
-                                            type="monotone"
-                                            dataKey="ScenarioProfit"
-                                            name="시나리오 영업이익"
-                                            stroke="#3b82f6"
-                                            strokeWidth={3}
-                                            dot={false}
-                                            animationDuration={1500}
-                                        />
-
-                                        {fundingEvent && (
-                                            <ReferenceDot x={fundingEvent.date} y={0} r={6} fill="#ef4444" stroke="#fff" strokeWidth={2} />
-                                        )}
-
-                                        {cashOutX && (
-                                            <ReferenceLine
-                                                x={cashOutX}
-                                                stroke="#ef4444"
-                                                strokeWidth={3}
-                                                strokeDasharray="6 6"
-                                                label={{ value: 'Cash Out', position: 'top', fill: '#ef4444', fontSize: 12, fontWeight: 700 }}
-                                            />
-                                        )}
-                                        {bepX && (
-                                            <ReferenceLine
-                                                x={bepX}
-                                                stroke="#22c55e"
-                                                strokeWidth={3}
-                                                strokeDasharray="6 6"
-                                                label={{ value: 'BEP', position: 'top', fill: '#22c55e', fontSize: 12, fontWeight: 700 }}
-                                            />
-                                        )}
-                                        {fundingX && fundingSignal && (
-                                            <ReferenceLine
+                                            <Area
                                                 yAxisId="cash"
-                                                x={fundingX}
-                                                stroke={fundingSignal.color}
-                                                strokeDasharray="3 3"
-                                                label={{
-                                                    value: fundingSignal.label,
-                                                    position: 'top',
-                                                    fill: fundingSignal.color,
-                                                    fontSize: 10,
-                                                    fontWeight: 700
-                                                }}
+                                                type="monotone"
+                                                dataKey="ScenarioCash"
+                                                name="시나리오 현금 (Strategy)"
+                                                stroke="#10b981"
+                                                fillOpacity={1}
+                                                fill="url(#colorCash)"
+                                                strokeWidth={4}
+                                                animationDuration={1500}
+                                                animationEasing="ease-in-out"
                                             />
-                                        )}
-                                        {equityX && equitySignal && (
-                                            <ReferenceLine
-                                                yAxisId="cash"
-                                                x={equityX}
-                                                stroke={equitySignal.color}
+
+                                            <Line
+                                                yAxisId="pnl"
+                                                type="monotone"
+                                                dataKey="ActualProfit"
+                                                name="실제 영업이익"
+                                                stroke="#ffffff88"
+                                                strokeWidth={3}
+                                                dot={false}
+                                                animationDuration={1000}
+                                            />
+                                            {fundingEvent && (
+                                                <ReferenceLine
+                                                    x={fundingEvent.date}
+                                                    stroke="#ef4444"
+                                                    strokeWidth={3}
+                                                    strokeDasharray="6 6"
+                                                    label={{
+                                                        value: `Runway < 6m → Funding (${fundingEvent.remainingRunway?.toFixed(1)}m)`,
+                                                        position: "top",
+                                                        fill: "#ef4444",
+                                                        fontSize: 10,
+                                                        fontWeight: 900
+                                                    }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                            {fundingEvent && fundingEvent.failDate && (
+                                                <ReferenceLine
+                                                    x={fundingEvent.failDate}
+                                                    stroke="#ff0000"
+                                                    strokeWidth={3}
+                                                    strokeDasharray="3 3"
+                                                    label={{
+                                                        value: `CASH ZERO (FAILURE) 💀`,
+                                                        position: "bottom",
+                                                        fill: "#ff0000",
+                                                        fontSize: 10,
+                                                        fontWeight: 900
+                                                    }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                            <Line
+                                                yAxisId="pnl"
+                                                type="monotone"
+                                                dataKey="BaselineProfit"
+                                                name="베이스라인 영업이익"
+                                                stroke="#3b82f666"
+                                                strokeWidth={2}
                                                 strokeDasharray="4 4"
-                                                label={{
-                                                    value: `🛡️ ${equitySignal.label}`,
-                                                    position: 'insideTopLeft',
-                                                    fill: equitySignal.color,
-                                                    fontSize: 12,
-                                                    fontWeight: 900,
-                                                    dy: 40,
-                                                    dx: 5
-                                                }}
+                                                dot={false}
+                                                animationDuration={1200}
                                             />
-                                        )}
-                                    </AreaChart>
-                                </ResponsiveContainer>
+                                            <Line
+                                                yAxisId="pnl"
+                                                type="monotone"
+                                                dataKey="ScenarioProfit"
+                                                name="시나리오 영업이익"
+                                                stroke="#3b82f6"
+                                                strokeWidth={3}
+                                                dot={false}
+                                                animationDuration={1500}
+                                            />
+
+                                            {cashOutX && (
+                                                <ReferenceLine
+                                                    x={cashOutX}
+                                                    stroke="#ef4444"
+                                                    strokeWidth={3}
+                                                    strokeDasharray="6 6"
+                                                    label={{ value: 'Cash Out', position: 'top', fill: '#ef4444', fontSize: 12, fontWeight: 700 }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                            {bepX && (
+                                                <ReferenceLine
+                                                    x={bepX}
+                                                    stroke="#22c55e"
+                                                    strokeWidth={3}
+                                                    strokeDasharray="6 6"
+                                                    label={{ value: 'BEP', position: 'top', fill: '#22c55e', fontSize: 12, fontWeight: 700 }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                            {fundingX && fundingSignal && (
+                                                <ReferenceLine
+                                                    yAxisId="cash"
+                                                    x={fundingX}
+                                                    stroke={fundingSignal.color}
+                                                    strokeDasharray="3 3"
+                                                    label={{
+                                                        value: `Funding Needed (Runway: ${equityAnalysis?.fundingRunwayAtEvent?.toFixed(1) || 'N/A'}개월)`,
+                                                        position: 'top',
+                                                        fill: fundingSignal.color,
+                                                        fontSize: 10,
+                                                        fontWeight: 800
+                                                    }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                            {equityX && equitySignal && (
+                                                <ReferenceLine
+                                                    yAxisId="cash"
+                                                    x={equityX}
+                                                    stroke={equitySignal.color}
+                                                    strokeDasharray="4 4"
+                                                    label={{
+                                                        value: `🛡️ 지분희석신호 (${equitySignal.label})`,
+                                                        position: 'insideTopLeft',
+                                                        fill: equitySignal.color,
+                                                        fontSize: 11,
+                                                        fontWeight: 900,
+                                                        dy: 40,
+                                                        dx: 5
+                                                    }}
+                                                    ifOverflow="hidden"
+                                                />
+                                            )}
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                </div>
                             </div>
                         </section>
+
+                        {/* Chart Indicator Legend */}
+                        <div className="flex flex-wrap gap-3 px-2 -mt-4">
+                            <p className="text-[9px] font-black text-slate-600 uppercase tracking-widest self-center w-full mb-1">📊 차트 수직선 설명</p>
+                            {fundingEvent && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-red-500/5 border border-red-500/20 rounded-xl">
+                                    <div className="w-3 border-t-2 border-dashed border-red-500" />
+                                    <span className="text-[9px] font-bold text-slate-400"><span className="text-red-400">🔴 Funding Needed</span> — 현금 생존이 6개월 미만으로 떨어지는 시점. <span className="text-white">지금 당장 자금 조달을 시작해야 하는 골든타임.</span></span>
+                                </div>
+                            )}
+                            {cashOutX && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-red-500/5 border border-red-500/20 rounded-xl">
+                                    <div className="w-3 border-t-2 border-dashed border-red-400" />
+                                    <span className="text-[9px] font-bold text-slate-400"><span className="text-red-400">❌ Cash Out</span> — 현금이 완전히 0이 되는 시점. 아무 조치 없을 경우 법인 사망 예측일.</span>
+                                </div>
+                            )}
+                            {bepX && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
+                                    <div className="w-3 border-t-2 border-dashed border-emerald-500" />
+                                    <span className="text-[9px] font-bold text-slate-400"><span className="text-emerald-400">✅ BEP</span> — Break-Even Point: 월간 수익이 운영비를 처음으로 넘는 시점. 이후 자생 가능.</span>
+                                </div>
+                            )}
+                            {equityX && equitySignal && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-white/5 border border-white/10 rounded-xl">
+                                    <div className="w-3 border-t-2 border-dashed" style={{ borderColor: equitySignal.color }} />
+                                    <span className="text-[9px] font-bold text-slate-400">
+                                        <span style={{ color: equitySignal.color }}>🛡️ 지분희석 신호 ({equitySignal.label})</span> — Cash Out 6개월 전 경고선. 현재 상태: <span style={{ color: equitySignal.color }}>{equitySignal.level === 'SAFE' ? '안전 (Runway 12개월 초과)' : equitySignal.level === 'MEDIUM_RISK' ? '주의 (Runway 6~12개월)' : '위험 (Runway 6개월 미만 — 희석 불가피)'}</span>
+                                    </span>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Funding Target Details Moved below Chart for density */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1724,9 +2007,32 @@ const StrategicCompass: React.FC = () => {
                                 {equityAnalysis && equityAnalysis.fundingNeeded > 0 && (
                                     <div className="p-6 bg-blue-500/10 border border-blue-500/20 rounded-[2rem] flex items-center justify-between gap-4 h-full">
                                         <div>
-                                            <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Runway 6개월 미만 진입 시 필요 자금 (Target: 18m)</p>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">추천 펀딩 규모 (Runway 6개월 미만 진입 시)</p>
+                                                <div className="group relative">
+                                                    <Info size={10} className="text-blue-500/50 cursor-help" />
+                                                    <div className="absolute bottom-full left-0 mb-2 w-64 p-3 bg-[#0B1221] border border-white/10 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                                                        <p className="text-[9px] text-slate-400 leading-relaxed font-bold italic">
+                                                            단순 현금 고갈 시점(Cash Out)이 아닌, 유동성 리스크가 가시화되는 **'Runway 6개월 미만'** 시점에 즉시 조달을 시작해야 함을 의미합니다. (Target: 18개월 생존분 확보)
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <p className="text-2xl font-black text-white">₩{(equityAnalysis.fundingNeeded / 100000000).toFixed(1)}억</p>
-                                            <p className="text-[9px] font-bold text-blue-500/60 mt-0.5 italic">현재 번레이트 기준 최소 수혈액</p>
+                                            {fundingEvent?.date && (
+                                                <div className="mt-1 space-y-0.5">
+                                                    <p className="text-[10px] font-black text-blue-300">
+                                                        📅 펀딩 필요 시점: <span className="text-white">{fundingEvent.date}</span>
+                                                    </p>
+                                                    {equityAnalysis.fundingRunwayAtEvent != null && (
+                                                        <p className="text-[9px] font-bold text-slate-400">
+                                                            → 해당 시점 Runway: <span className="text-rose-400 font-black">{equityAnalysis.fundingRunwayAtEvent.toFixed(1)}개월</span>
+                                                            <span className="text-slate-600 ml-1">(해당 시점 기준)</span>
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
+                                            <p className="text-[9px] font-bold text-blue-500/60 mt-1 italic">현재 번레이트 기준 목표 유동성 확보액</p>
 
                                             {dilutionAnalysis && (
                                                 <div className="mt-4 p-4 bg-white/5 rounded-2xl border border-white/5 space-y-2">
@@ -1775,6 +2081,17 @@ const StrategicCompass: React.FC = () => {
                                                     <AlertCircle size={12} /> {dilutionRiskSignal.message}
                                                 </div>
                                             )}
+
+                                            {fundingEvent?.failDate && (
+                                                <div className="mt-3 p-4 bg-rose-500/5 border border-rose-500/10 rounded-2xl">
+                                                    <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-2 mb-1">
+                                                        <Zap size={10} className="fill-rose-500" /> Do-Nothing Scenario
+                                                    </p>
+                                                    <p className="text-[10px] font-bold text-slate-300 leading-tight">
+                                                        자금 조달 미실행 시 <span className="text-white underline decoration-rose-500 decoration-2 underline-offset-2">{fundingEvent.failDate}</span>에 현금이 완전히 고갈(Cash Out)될 것으로 예측됩니다.
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-400">
                                             <Zap size={24} />
@@ -1798,7 +2115,7 @@ const StrategicCompass: React.FC = () => {
 
                     <div className={`transition-all duration-1000 ${(!equityAnalysis || equityAnalysis.fundingNeeded <= 0) ? 'opacity-30 blur-[2px] pointer-events-none grayscale' : 'opacity-100'}`}>
                         <div className="bg-[#121620] border border-white/5 p-16 rounded-[4rem] shadow-3xl relative overflow-hidden bg-gradient-to-br from-[#121620] to-[#0A0D14]">
-                            <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/5 blur-[120px] rounded-full -mr-48 -mt-48" />
+                            <div className="absolute top-0 right-0 w-96 h-96 bg-purple-500/5 blur-[120px] rounded-full -mr-48 -mt-48 pointer-events-none" />
 
                             <div className="flex justify-between items-center mb-16 relative z-10">
                                 <div className="flex items-center gap-6">
@@ -1832,7 +2149,7 @@ const StrategicCompass: React.FC = () => {
                                     />
                                 </div>
                                 <div className="relative flex items-center justify-center">
-                                    <div className="absolute inset-0 bg-purple-500/10 blur-[120px] rounded-full scale-150" />
+                                    <div className="absolute inset-0 bg-purple-500/10 blur-[120px] rounded-full scale-150 pointer-events-none" />
                                     <div className="w-full h-80 relative z-10">
                                         <ResponsiveContainer width="100%" height="100%">
                                             <RePieChart>
@@ -1856,7 +2173,7 @@ const StrategicCompass: React.FC = () => {
                                                 />
                                             </RePieChart>
                                         </ResponsiveContainer>
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center pt-2">
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center pt-2 pointer-events-none">
                                             <span className="text-5xl font-black text-white italic tracking-tighter leading-none">{report.founderRatio.toFixed(1)}%</span>
                                             <span className="text-xs font-black text-slate-500 uppercase tracking-widest mt-3">Founder Share</span>
                                         </div>
@@ -1971,7 +2288,7 @@ const TooltipWrapper: React.FC<{ explanation?: string, children: React.ReactNode
                         <p className="text-xs text-slate-400 leading-relaxed font-bold whitespace-normal italic">
                             {explanation}
                         </p>
-                        <div className="absolute -bottom-1.5 left-10 w-3 h-3 bg-[#0B1221] border-b border-r border-white/10 transform rotate-45" />
+                        <div className="absolute -bottom-1.5 left-10 w-3 h-3 bg-[#0B1221] border-b border-r border-white/10 transform rotate-45 pointer-events-none" />
                     </motion.div>
                 )}
             </AnimatePresence>

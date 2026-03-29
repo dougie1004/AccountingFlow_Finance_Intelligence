@@ -22,7 +22,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 import { MetricRegistry } from '../core/reporting/metricRegistry';
 import { projectScenarioFrontend } from '../core/simulation/strategicSimulator';
-import { calculateRunway as calculateStdRunway } from '../core/metrics/metricRegistry';
+import { 
+    calculateCashRunway,
+    calculateCashBurn,
+    calculateCashBurnBreakdown,
+    calculateOperatingBurn,
+    calculateRobustOperatingBurn 
+} from '../core/metrics/metricRegistry';
+import { generateCashFlow } from '../core/reporting/generateCashFlow';
 
 const KPIProgress: React.FC<{ label: string, val: number, color: string }> = ({ label, val, color }) => (
     <div>
@@ -122,9 +129,9 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
             ? MetricRegistry.calculateProjectedRunway(liquidCash, activeSimulation, selectedDate)
             : MetricRegistry.calculateRunway(liquidCash, globalLedger, selectedDate);
         
-        let runway = runwayMetric.value;
+        const rawRunway = runwayMetric.value;
         if (runwayMetric.dataSource === 'actual') runwaySource = 'history';
-        const liquidityRunway = runway; 
+        const liquidityRunway = rawRunway; 
 
         // Detect specific accounts
         const hasLease = Object.values(trialBalance).some(v => 
@@ -132,12 +139,27 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
             (v.closingDebit !== 0 || v.closingCredit !== 0)
         );
 
-        // Healthy only if profitable OR has > 12 months of runway
-        const isHealthy = isProfitable || runway > 12;
+        // [V2.8.2] Unified Burn & Breakdown (Robust P&L and Cash)
+        const opBurn = calculateRobustOperatingBurn([financials.expenses]); 
 
+        // [V11 FIX] Build Burn Average strictly from historical data <= selectedDate
+        const historicalCashflow = generateCashFlow(globalLedger, 0)
+            .filter((cf: any) => cf.date <= (selectedPeriod || ''));
+
+        const historicalMonthsData = historicalCashflow.map((m: any) => ({
+            cashIn: m.cashIn || 0,
+            cashOut: m.cashOut || 0
+        }));
+
+        const burnBreakdown = calculateCashBurnBreakdown(historicalMonthsData);
+        const cashBurn = burnBreakdown.netBurn;
+
+        const runway = calculateCashRunway(liquidCash, cashBurn);
+        const isHealthy = isProfitable || runway > 12;
+        
         const observations = isProfitable 
             ? `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 순이익은 효율적인 비용 통제와 매출 성장이 맞물린 결과입니다. 현재의 이익 구조를 유지하면서 신규 성장 동력을 확보하는 전략이 유효합니다.`
-            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 높은 비용 비중(Opex Ratio: ${opexRatio.toFixed(1)}%)을 시사합니다. ${runway < 6 ? `현재 소모액 기준 생존 기간이 ${runway.toFixed(1)}개월로 매우 촉박합니다.` : '단기 매출 확보와 고정비 효율화가 시급한 시점입니다.'}`;
+            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 높은 비용 비중(Opex Ratio: ${opexRatio.toFixed(1)}%)을 시사합니다. ${runway < 6 ? `현재 현금 소모액(Cash Burn) 기준 생존 기간이 ${runway.toFixed(1)}개월로 보수적인 관리가 필요합니다.` : '단기 매출 확보와 고정비 효율화가 시급한 시점입니다.'}`;
 
         const highlightedItems = [];
         if (cashRatio > 30) {
@@ -165,11 +187,14 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
 
         return {
             observations,
-            status: isHealthy ? 'Healthy' : 'Critical',
+            status: (isProfitable || runway > 12) ? 'Healthy' : 'Critical',
             highlights: highlightedItems.join(' '),
             roadmap,
             runway,
-            liquidityRunway,
+            opBurn,
+            cashBurn,
+            burnBreakdown,
+            liquidityRunway: runway,
             cashRatio,
             runwaySource,
             runwayLabel: runwaySource === 'simulation' ? 'Strategic Simulation (AI)' : (runwaySource === 'history' ? '3M Historical Average' : 'Macro Baseline Projection'),
@@ -247,7 +272,8 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                     </button>
                     <div>
                         <div className="flex items-center gap-3 mb-1">
-                             <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-emerald-500/20">공식 경영 리포트 (EXECUTIVE REPORT)</span>
+                             <span className="text-[10px] font-black text-white bg-blue-600 px-3 py-1 rounded-full uppercase tracking-widest shadow-lg shadow-blue-600/20">ACCRUAL VIEW → 손익(P&L) 기반 분석</span>
+                             <span className="text-[10px] font-black text-white bg-emerald-500 px-3 py-1 rounded-full uppercase tracking-widest shadow-lg shadow-emerald-500/20">CASH VIEW (보조)</span>
                              <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-indigo-500/20">
                                 {finalizedMonths[selectedPeriod] === 'hard' ? 'HARD_SEALED' : 'SOFT_PRELIMINARY'}
                              </span>
@@ -305,14 +331,15 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                     <div className="absolute right-[-10%] top-[-10%] opacity-10 group-hover:scale-110 transition-transform text-emerald-400">
                         <Zap size={140} />
                     </div>
-                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">기말 현금 잔액 <span className="text-slate-600">(CASH)</span></p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">가용 현금 및 생존 기간 <span className="text-slate-600">(CASH & RUNWAY)</span></p>
                     <h2 className="text-3xl font-black text-emerald-400 tracking-tighter italic">₩{financials.cash.toLocaleString()}</h2>
-                    <p className={`text-[10px] mt-2 font-black uppercase tracking-widest ${executiveInsight?.runway && executiveInsight.runway < 6 ? 'text-rose-400' : 'text-slate-500'}`}>
-                        {executiveInsight?.runway && executiveInsight.runway < 24 ? `Projected Runway: ${executiveInsight.runway.toFixed(1)}개월` : '현금 유동성 충분함'}
-                    </p>
-                    <p className="text-[8px] text-slate-600 font-bold uppercase tracking-widest mt-1 italic">
-                        Calc Model: {executiveInsight?.runwayLabel}
-                    </p>
+                    <div className="mt-3 space-y-1">
+                        <p className="text-[10px] font-black text-white uppercase tracking-widest">
+                            Runway: {executiveInsight?.runway ? (executiveInsight.runway === Infinity ? 'Growth / Sustainable' : `${executiveInsight.runway.toFixed(1)}개월`) : 'N/A'}
+                        </p>
+                        <p className="text-[9px] font-bold text-slate-500">Operating Burn: ₩{Math.round(executiveInsight?.opBurn || 0).toLocaleString()} (손익 기준)</p>
+                        <p className="text-[9px] font-black text-emerald-500">Cash Burn: ₩{Math.round(executiveInsight?.cashBurn || 0).toLocaleString()} (현금 기준)</p>
+                    </div>
                 </div>
             </div>
 
