@@ -1,4 +1,4 @@
-import { calculateSequentialRunway, calculateCashRunway } from '../core/metrics/metricRegistry';
+import { calculateSequentialRunway, calculateCashRunway, calculateBurn } from '../core/metrics/metricRegistry';
 
 export interface StrategicEngineInput {
     chartData: any[];
@@ -32,32 +32,17 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
     const nowIndex = chartData.findIndex((d: any) => d.isNow);
     const currentCash = liquidCash?.value || 0;
 
-    // 2. Metrics & Burn Average (Injection 기반)
-    // [PHASE 2 FORCED SYNC]
-    const RECENT_WINDOW = 6;
-    const startIdx = Math.max(0, nowIndex - RECENT_WINDOW);
-    const endIdx = nowIndex; 
-    const historicalSlice = chartData.slice(startIdx, endIdx);
-
-    const totalOperatingIn = historicalSlice.reduce((sum: number, m: any) => sum + (m.operatingCashIn || 0), 0);
-    const totalOut = historicalSlice.reduce((sum: number, m: any) => sum + (m.cashOut || 0), 0);
-    const historicalCount = historicalSlice.length || 1;
-
-    const avgOperatingIn = totalOperatingIn / historicalCount;
-    const avgOut = totalOut / historicalCount;
-    const netCashAvg = avgOperatingIn - avgOut;
-    const netBurnValue = netCashAvg < 0 ? Math.abs(netCashAvg) : 0;
-
+    // 2. Metrics & Burn Average (Raw Entry 기반으로 전면 교정)
+    // [V12 INTEGRITY FIX]
+    const burnResult = calculateBurn(projectionLedger);
+    
     const burnBreakdown = {
-        cashIn: Math.round(avgOperatingIn),
-        financingIn: 0,
-        cashOut: Math.round(avgOut),
-        netBurn: Math.round(netBurnValue),
-        isBurning: netCashAvg < 0,
-        netCashAvg: Math.round(netCashAvg),
-        window: historicalSlice.length
+        ...burnResult,
+        isBurning: burnResult.netBurn > 0,
+        netCashAvg: -burnResult.netBurn, // 소진액이므로 음수 처리
+        window: 0 // Ledger 전체 기반
     };
-    const cashBurn = burnBreakdown.netBurn;
+    const cashBurn = burnResult.netBurn;
 
     // 3. Runway & Inflection Point (Injection 기반)
     const futureCashDeltas = chartData
@@ -103,7 +88,7 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
         liquidityRunway,
         cashBurn,
         burnBreakdown,
-        burnBridge: { pnlBurn: 0, cashOut: Math.round(avgOut), diff: 0 } 
+        burnBridge: { pnlBurn: 0, cashOut: Math.round(burnResult.outflow), diff: 0 } 
     };
 
     // 4. Trajectory analysis
@@ -129,9 +114,11 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
         runwayMonths: runway.value,
         strategicRunway: runway.value,
         survivalRunway: liquidityRunway.value,
-        cashBurn: cashBurn,
-        netBurn: burnBreakdown.netBurn,
-        grossBurn: burnBreakdown.cashOut,
+        cashBurn: burnResult.netBurn,
+        netBurn: burnResult.netBurn,
+        grossBurn: burnResult.grossBurn,
+        inflow: burnResult.inflow,
+        outflow: burnResult.outflow,
         actualNetProfit,
         liquidityRunwayMonths: liquidityRunway.value,
         breakEvenMonth: breakEvenMonthIdx,

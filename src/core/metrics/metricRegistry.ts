@@ -28,17 +28,52 @@ export function calculateRobustOperatingBurn(expenseSeries: number[]): number {
 }
 
 /**
- * 2. Cash Burn (CASH)
- * = 현금 계정 감소 평균 (Cash Delta 기준)
+ * [V12] Raw-Entry Based Burn Calculation (REPLACES aggregate logic)
+ * Ensures deterministic distinction between Inflow/Outflow.
  */
-export function calculateCashBurn(futureCashDeltas: number[]): number {
-    const breakdown = calculateCashBurnBreakdownLegacy(futureCashDeltas);
-    return breakdown.netBurn;
+export function calculateBurn(entries: any[]) {
+    if (!entries || entries.length === 0) {
+      console.log("🔥 [Burn Fixed] Empty entries");
+      return { inflow: 0, outflow: 0, netBurn: 0, grossBurn: 0 };
+    }
+  
+    let inflow = 0;
+    let outflow = 0;
+  
+    for (const e of entries) {
+      const amount = Number(e.amount) || 0;
+      const type = (e.type || "").toUpperCase();
+  
+      // ✅ 현금 유입/유출 라벨 기반 처리
+      if (type === "INFLOW" || (e.scope === 'future' && amount > 0)) {
+        inflow += Math.abs(amount);
+      } else if (type === "OUTFLOW" || (e.scope === 'future' && amount < 0)) {
+        outflow += Math.abs(amount);
+      }
+    }
+  
+    const grossBurn = outflow;
+    // 🔥 핵심 수정: netBurn은 반드시 양수(소진) 또는 0(건강)
+    const netBurn = Math.max(outflow - inflow, 0);
+  
+    console.log("🔥 [Burn Fixed]", {
+      inflow,
+      outflow,
+      netBurn,
+      grossBurn,
+      totalEntries: entries.length
+    });
+  
+    return {
+      inflow,
+      outflow,
+      netBurn,
+      grossBurn
+    };
 }
 
 /**
- * [V11 FIX] Cash Burn Breakdown (Aggregated Version)
- * Input MUST be monthly aggregated values (cashIn, cashOut)
+ * [V11 FIX] Cash Burn Breakdown (Aggregated Version) - Deprecated in favor of calculateBurn
  */
 export function calculateCashBurnBreakdown(monthlyData: { cashIn: number, cashOut: number }[]) {
     if (!monthlyData || monthlyData.length === 0) return { cashIn: 0, cashOut: 0, netBurn: 0 };
@@ -47,19 +82,29 @@ export function calculateCashBurnBreakdown(monthlyData: { cashIn: number, cashOu
     const totalIn = monthlyData.reduce((a, b) => a + (b.cashIn || 0), 0);
     const totalOut = monthlyData.reduce((a, b) => a + (b.cashOut || 0), 0);
     
-    // 월 단위 aggregation 후 평균 계산 (raw delta 평균 금지 대응)
     const avgIn = totalIn / count;
     const avgOut = totalOut / count;
 
     const netCash = avgIn - avgOut;
     const netBurn = netCash < 0 ? Math.abs(netCash) : 0;
 
-    // 포맷팅: Math.round 적용 (소수점 제거)
     return {
         cashIn: Math.round(avgIn),
         cashOut: Math.round(avgOut),
         netBurn: Math.round(netBurn)
     };
+}
+
+/**
+ * 2. Cash Burn (CASH) - Standard Wrapper
+ */
+export function calculateCashBurn(futureCashDeltas: number[]): number {
+    const monthlyData = futureCashDeltas.map(d => ({
+        cashIn: d > 0 ? d : 0,
+        cashOut: d < 0 ? Math.abs(d) : 0
+    }));
+    const breakdown = calculateCashBurnBreakdown(monthlyData);
+    return breakdown.netBurn;
 }
 
 /**
@@ -78,8 +123,8 @@ export function calculateCashBurnBreakdownLegacy(deltas: number[]) {
  * [Standardized] Runway Calculation
  * Formula: Runway = Net Liquidity / Cash Burn
  */
-export function calculateCashRunway(netLiquidity: number, cashBurn: number): number {
-    if (cashBurn <= 0) return Infinity; // [V12] Sustainable / Growth
+export function calculateCashRunway(netLiquidity: number, cashBurn: number): number | null {
+    if (cashBurn <= 0) return null; // [V12] Infinity 금지
     const runway = netLiquidity / cashBurn;
     return runway > 0 ? runway : 0;
 }
@@ -98,6 +143,7 @@ export function calculateSequentialRunway({
   
   for (const delta of futureCashDeltas) {
       runningCash += delta;
+      if (delta >= 0) break; // 🔥 [V12] Sustainable/Income -> Simulation break for runway
       if (runningCash <= 0) break;
       months++;
       if (months >= 36) break;
