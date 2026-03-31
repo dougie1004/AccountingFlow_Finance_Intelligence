@@ -485,8 +485,8 @@ const StrategicCompass: React.FC = () => {
 
                 {/* 🚫 DO NOT add new burn models or burn bridge logic here. Use stats only. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExplainableKPI label="💸 Survival Runway" result={stats?.liquidityRunway || null} color={survivalRunway >= 6 ? 'text-blue-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{v === Infinity ? "∞" : `${v.toFixed(1)}개월`}</span>} />
-                    <ExplainableKPI label="📈 Strategic Runway" result={stats?.runway || null} color={strategicRunway >= 12 ? 'text-emerald-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{v === Infinity ? "∞" : `${v.toFixed(1)}개월`}</span>} />
+                    <ExplainableKPI label="💸 Survival Runway" result={stats?.liquidityRunway || null} color={survivalRunway >= 6 ? 'text-blue-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
+                    <ExplainableKPI label="📈 Strategic Runway" result={stats?.runway || null} color={strategicRunway >= 12 ? 'text-emerald-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
                     <ExplainableKPI label="흑자 전환 시점" result={{ value: breakEvenMonth || 0, formula: 'Scenario Net Income > 0 Check', period: 'Simulation', dataSource: 'scenario' } as any} color="text-indigo-400" formatValue={(v) => <span className="text-xl font-black italic">{breakEvenMonth != null ? `${breakEvenMonth}개월` : "N/A"}</span>} />
                     <ExplainableKPI label="Gross Burn" result={{ value: grossBurn, formula: 'Avg Cash Outflow', period: 'Recent 6m', dataSource: 'scenario' } as any} color="text-slate-400" formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>} />
                 </div>
