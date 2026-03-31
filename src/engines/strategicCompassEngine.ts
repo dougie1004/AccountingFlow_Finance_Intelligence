@@ -21,18 +21,19 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
     const { 
         chartData, ssotMetrics, projectionLedger, selectedDate, 
         preMoneyValuation, investmentAmount, actualNetProfit, liquidCash,
-        actualLedger = [], asOfDate
+        actualLedger = []
     } = input;
 
-    // 🔥 [V12.1] Engine Input SSOT Selection
-    const activeLedger = projectionLedger?.length > 0 ? projectionLedger : actualLedger;
+    // 🔥 [V12.2] FULL DATASET MERGE (Integrity SSOT)
+    // Scenario만 보면 기초잔액/과거Burn 상실됨 -> 합쳐서 전체 Trajectory 확보
+    const entries = [...actualLedger, ...(projectionLedger || [])];
 
-    // 1. 입력 무결성 검증 로깅 (Rule: Force Data Injection)
-    console.log("🔥 ENGINE INPUT", {
-        actual: actualLedger.length,
-        scenario: projectionLedger.length,
-        active: activeLedger.length,
-        asOfDate: asOfDate || selectedDate
+    // 1. 입력 무결성 검증 로깅 (대표님 요구사항)
+    console.log("🔥 ENGINE INPUT CHECK", {
+      scenarioCount: projectionLedger?.length,
+      actualCount: actualLedger?.length,
+      using: projectionLedger?.length > 0 ? "SCENARIO + ACTUAL MIX" : "ACTUAL",
+      totalEntries: entries.length
     });
 
     const currentYearMonth = selectedDate.substring(0, 7);
@@ -41,7 +42,7 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
 
     // 2. Metrics & Burn Average (Raw Entry 기반으로 전면 교정)
     // [V12 INTEGRITY FIX]
-    const burnResult = calculateBurn(activeLedger);
+    const burnResult = calculateBurn(entries);
     
     const burnBreakdown = {
         ...burnResult,

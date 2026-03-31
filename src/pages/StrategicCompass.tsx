@@ -307,8 +307,9 @@ const StrategicCompass: React.FC = () => {
         setExpenseMult(1.0);
         setFixedCostDelta(0);
         setProjectionMonths(36);
-        setScenarioLedger([]); // 🔥 시나리오 레저 초기화
-        setVersion(v => v + 1); // 재로그 트리거
+        setScenarioLedger([]); // 🔥 시나리오 레저 초기화 (SSOT Fallback 트리거)
+        setVersion(v => v + 1); // 강제 재로그 및 렌더링 트리거
+        console.log("🔥 [RESET] Scenario data cleared. Falling back to Actual Ledger.");
     };
 
     const ANALYSIS_YEARS = useMemo(() => {
@@ -374,21 +375,20 @@ const StrategicCompass: React.FC = () => {
         const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
 
         // 🔥 Debugging Data Flow (SSOT 체크용)
-        console.log("🔥 STRATEGIC ENGINE CALL", {
-            actualLen: actualLedger.length,
-            scenarioLen: scenarioLedger?.length,
-            cash: liquidCash?.value,
-            selectedDate,
-            totalLedgerAmount: actualLedger.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+        console.log("🔥 STRATEGIC COMPASS SSOT", {
+            actualLedger: actualLedger.length,
+            scenarioLedger: scenarioLedger?.length,
+            targetDate: selectedDate,
+            liquidCash: liquidCash?.value
         });
 
         return runStrategicCompassEngine({
             chartData: legacyChartData, 
             ssotMetrics, 
             projectionLedger: scenarioLedger, 
-            actualLedger, // 🔥 Raw Ledger 전달
+            actualLedger, // 🔥 실제 장부 명시적 주입
             selectedDate, 
-            asOfDate: selectedDate, // 🔥 기준일 동기화
+            asOfDate: selectedDate, 
             preMoneyValuation, 
             investmentAmount,
             actualNetProfit: actualNetProfit.value, 
