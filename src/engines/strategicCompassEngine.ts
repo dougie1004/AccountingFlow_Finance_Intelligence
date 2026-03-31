@@ -24,31 +24,30 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
         actualLedger = []
     } = input;
 
-    // 🔥 [V12.2] FULL DATASET MERGE (Integrity SSOT)
-    // Scenario만 보면 기초잔액/과거Burn 상실됨 -> 합쳐서 전체 Trajectory 확보
+    // 🔥 [V13.1] DATA BOUNDARY RESTORATION (ChatGPT Analysis)
+    // 1. Burn(소모액) 및 현재 상태 지표는 오직 '과거 실적(Actual)' 기반으로 앵커링한다.
+    // 전체 병합 데이터를 쓰면 2028년 미래 시점으로 지표가 밀려버리는 현상 방지.
+    const burnResult = calculateBurn(actualLedger);
+
+    // 2. 전체 Trajectory 확보를 위한 병합 (차트 렌더링 및 런웨이 누적 계산용)
     const entries = [...actualLedger, ...(projectionLedger || [])];
 
-    // 1. 입력 무결성 검증 로깅 (대표님 요구사항)
-    console.log("🔥 ENGINE INPUT CHECK", {
-      scenarioCount: projectionLedger?.length,
-      actualCount: actualLedger?.length,
-      using: projectionLedger?.length > 0 ? "SCENARIO + ACTUAL MIX" : "ACTUAL",
-      totalEntries: entries.length
+    // 1. 입력 무결성 검증 로깅
+    console.log("🔥 ENGINE INPUT CHECK (Boundary Fixed)", {
+      actualCount: actualLedger.length,
+      currentRealBurn: burnResult.netBurn,
+      asOfDate: selectedDate
     });
 
     const currentYearMonth = selectedDate.substring(0, 7);
-    const nowIndex = chartData.findIndex((d: any) => d.isNow);
+    const nowIndex = chartData.findIndex((d: any) => d.fullMonth === currentYearMonth || d.isNow);
     const currentCash = liquidCash?.value || 0;
 
-    // 2. Metrics & Burn Average (Raw Entry 기반으로 전면 교정)
-    // [V12 INTEGRITY FIX]
-    const burnResult = calculateBurn(entries);
-    
     const burnBreakdown = {
         ...burnResult,
         isBurning: burnResult.netBurn > 0,
-        netCashAvg: -burnResult.netBurn, // 소진액이므로 음수 처리
-        window: 0 // Ledger 전체 기반
+        netCashAvg: -burnResult.netBurn, 
+        window: 6 // 최근 6개월 실적 기반
     };
     const cashBurn = burnResult.netBurn;
 
