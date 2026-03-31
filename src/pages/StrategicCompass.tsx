@@ -182,7 +182,6 @@ const StrategicCompass: React.FC = () => {
         financials,
         selectedDate,
         accounts,
-        baselineSnapshot,
         setBaselineSnapshot,
         revenueMult,
         setRevenueMult,
@@ -209,6 +208,15 @@ const StrategicCompass: React.FC = () => {
     const [actualLedger, setActualLedger] = useState<JournalEntry[]>([]);
     const [loading, setLoading] = useState(false);
     const [savedStrategies, setSavedStrategies] = useState<any[]>([]);
+    const [version, setVersion] = useState(0); // 🔥 강제 재랜더 트리거
+
+    // 🚨 전역 장부 변경 시 반응성 강제 보강
+    useEffect(() => {
+        if (globalLedger && globalLedger.length > 0) {
+            setActualLedger(globalLedger.map((e: JournalEntry) => ({ ...e, scope: (e.scope ?? 'actual').toLowerCase() as any })));
+            setVersion(v => v + 1); 
+        }
+    }, [globalLedger]);
 
     const report = useMemo(() => {
         const result = analyzeEquityControl(preMoneyValuation || 1000000000, investmentAmount);
@@ -260,10 +268,21 @@ const StrategicCompass: React.FC = () => {
         }
     }, [financials, selectedDate, actualLedger, macro, projectionMonths, currentLedgerHash, setBaselineEntries, setBaselineTimestamp, setBaselineSnapshot]);
 
+    // 🔥 [V12.1] baselineSnapshot 강제 재계산 (Stale 방지)
+    const baselineSnapshot = useMemo(() => {
+        if (!actualLedger.length) return null;
+        return { 
+            date: selectedDate, 
+            hash: currentLedgerHash, 
+            ledger: actualLedger, 
+            macro: { ...macro } 
+        };
+    }, [actualLedger, selectedDate, currentLedgerHash, macro, version]);
+
     const isBaselineStale = useMemo(() => {
         if (!baselineSnapshot) return true;
-        return baselineSnapshot.date !== selectedDate || baselineSnapshot.hash !== currentLedgerHash || JSON.stringify(baselineSnapshot.macro) !== JSON.stringify(macro);
-    }, [selectedDate, currentLedgerHash, baselineSnapshot, macro]);
+        return baselineSnapshot.date !== selectedDate || baselineSnapshot.hash !== currentLedgerHash;
+    }, [selectedDate, currentLedgerHash, baselineSnapshot]);
 
     useEffect(() => {
         if (globalLedger && globalLedger.length > 0) {
@@ -281,6 +300,15 @@ const StrategicCompass: React.FC = () => {
     const handleSaveStrategy = () => {
         const name = prompt("저장할 전략의 이름을 입력하세요:");
         if (name) setSavedStrategies(prev => [...prev, { name, revenueMult, expenseMult, fixedCostDelta, timestamp: new Date().toLocaleString() }]);
+    };
+
+    const handleReset = () => {
+        setRevenueMult(1.0);
+        setExpenseMult(1.0);
+        setFixedCostDelta(0);
+        setProjectionMonths(36);
+        setScenarioLedger([]); // 🔥 시나리오 레저 초기화
+        setVersion(v => v + 1); // 재로그 트리거
     };
 
     const ANALYSIS_YEARS = useMemo(() => {
@@ -339,23 +367,34 @@ const StrategicCompass: React.FC = () => {
     // 🚨 SSOT RULE: KPI calculations MUST NOT be implemented in this file.
     // All metrics must come from engineResult.stats (metricRegistry / engine layer).
     const engineResult = useMemo(() => {
-        if (!financials || !trialBalance || !ssotMetrics.cashflow || !scenarioLedger) return null;
+        if (!financials || !trialBalance || !ssotMetrics.cashflow) return null;
         
         // Input Preparation (Atomic)
         const liquidCash = MetricRegistry.calculateLiquidity(trialBalance);
         const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
 
+        // 🔥 Debugging Data Flow (SSOT 체크용)
+        console.log("🔥 STRATEGIC ENGINE CALL", {
+            actualLen: actualLedger.length,
+            scenarioLen: scenarioLedger?.length,
+            cash: liquidCash?.value,
+            selectedDate,
+            totalLedgerAmount: actualLedger.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+        });
+
         return runStrategicCompassEngine({
             chartData: legacyChartData, 
             ssotMetrics, 
             projectionLedger: scenarioLedger, 
+            actualLedger, // 🔥 Raw Ledger 전달
             selectedDate, 
+            asOfDate: selectedDate, // 🔥 기준일 동기화
             preMoneyValuation, 
             investmentAmount,
             actualNetProfit: actualNetProfit.value, 
             liquidCash
         });
-    }, [financials, trialBalance, legacyChartData, ssotMetrics, scenarioLedger, selectedDate, preMoneyValuation, investmentAmount]);
+    }, [financials, trialBalance, legacyChartData, ssotMetrics, scenarioLedger, actualLedger, selectedDate, preMoneyValuation, investmentAmount, version]);
 
     const stats = engineResult?.stats as any;
 

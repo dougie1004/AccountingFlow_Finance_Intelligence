@@ -9,6 +9,8 @@ export interface StrategicEngineInput {
     investmentAmount: number;
     actualNetProfit: number;
     liquidCash: any; // Object { value, inputs, ... }
+    actualLedger?: any[]; // Raw ledger access
+    asOfDate?: string;     // Sync with dashboard date
 }
 
 /**
@@ -18,14 +20,19 @@ export interface StrategicEngineInput {
 export function runStrategicCompassEngine(input: StrategicEngineInput) {
     const { 
         chartData, ssotMetrics, projectionLedger, selectedDate, 
-        preMoneyValuation, investmentAmount, actualNetProfit, liquidCash 
+        preMoneyValuation, investmentAmount, actualNetProfit, liquidCash,
+        actualLedger = [], asOfDate
     } = input;
 
+    // 🔥 [V12.1] Engine Input SSOT Selection
+    const activeLedger = projectionLedger?.length > 0 ? projectionLedger : actualLedger;
+
     // 1. 입력 무결성 검증 로깅 (Rule: Force Data Injection)
-    console.log("[ENGINE INPUT SIZE]", {
-        chartData: chartData.length,
-        cashFlow: ssotMetrics.cashflow?.length,
-        ledger: projectionLedger.length
+    console.log("🔥 ENGINE INPUT", {
+        actual: actualLedger.length,
+        scenario: projectionLedger.length,
+        active: activeLedger.length,
+        asOfDate: asOfDate || selectedDate
     });
 
     const currentYearMonth = selectedDate.substring(0, 7);
@@ -34,7 +41,7 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
 
     // 2. Metrics & Burn Average (Raw Entry 기반으로 전면 교정)
     // [V12 INTEGRITY FIX]
-    const burnResult = calculateBurn(projectionLedger);
+    const burnResult = calculateBurn(activeLedger);
     
     const burnBreakdown = {
         ...burnResult,
