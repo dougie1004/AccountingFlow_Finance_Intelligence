@@ -13,7 +13,15 @@ export interface MetricResult {
     monthlyDeltas?: { date: string; cashDelta: number }[];
 }
 
-const CASH_ACCOUNTS = ['acc_101', 'acc_103'];
+const CASH_ACCOUNTS = [
+    'acc_101', // 현금
+    'acc_102', // 당좌예금
+    'acc_103', // 보통예금
+    'acc_104', // 정기예금
+    'acc_105', // 정기적금
+    'acc_106', // 기타예금
+    'acc_108', // 단기금융상품 (유동성)
+];
 const PAYABLE_ACCOUNTS = ['acc_251', 'acc_253']; 
 const ACCRUED_EXPENSES = ['acc_255'];           
 
