@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useAccounting } from '../hooks/useAccounting';
 import { FileText, Search, Calendar, ChevronDown, ArrowUpDown, ChevronUp } from 'lucide-react';
+import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 
 const LedgerView: React.FC = () => {
     const { accountingLedger, allLinesLedger, partners, selectedDate } = useAccounting();
@@ -12,7 +13,8 @@ const LedgerView: React.FC = () => {
     React.useEffect(() => {
         if (!startDate && !endDate && selectedDate) {
             const d = new Date(selectedDate);
-            const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+            // [STRICT] Temporal Integrity: Default to YTD (Year-to-Date) to ensure recent transactions are visible
+            const start = `${d.getFullYear()}-01-01`; 
             const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
             const end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
             setStartDate(start);
@@ -139,21 +141,13 @@ const LedgerView: React.FC = () => {
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-[#151D2E] p-2 rounded-2xl border border-white/5 shadow-inner">
-                        <Calendar size={18} className="text-slate-500 ml-2" />
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-white outline-none focus:ring-0"
-                        />
-                        <span className="text-slate-700">~</span>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-white outline-none focus:ring-0 mr-2"
-                        />
+                    <div className="flex items-center gap-3 bg-[#151D2E] p-2 px-3 rounded-2xl border border-white/5 shadow-inner">
+                        <Calendar size={18} className="text-slate-500" />
+                        <div className="flex items-center gap-2">
+                            <PremiumDatePicker value={startDate} onChange={setStartDate} />
+                            <span className="text-slate-700 font-black">~</span>
+                            <PremiumDatePicker value={endDate} onChange={setEndDate} />
+                        </div>
                     </div>
                 </div>
             </div>

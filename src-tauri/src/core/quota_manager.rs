@@ -23,7 +23,10 @@ impl QuotaManager {
     }
 
     pub fn can_use_ai(&self, tenant_id: &str, tier: &str) -> Result<(), String> {
-        let mut usage = self.usage.lock().unwrap();
+        let mut usage = match self.usage.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         let quota = usage.entry(tenant_id.to_string()).or_insert(UserQuota {
             tenant_id: tenant_id.to_string(),
             daily_calls: 0,
@@ -56,7 +59,10 @@ impl QuotaManager {
     }
 
     pub fn record_usage(&self, tenant_id: &str, cost_usd: f64) {
-        let mut usage = self.usage.lock().unwrap();
+        let mut usage = match self.usage.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         if let Some(quota) = usage.get_mut(tenant_id) {
             quota.daily_calls += 1;
             quota.monthly_calls += 1;
@@ -65,7 +71,10 @@ impl QuotaManager {
     }
 
     pub fn get_usage(&self, tenant_id: &str) -> Option<(u32, u32, f64)> {
-        let usage = self.usage.lock().unwrap();
+        let usage = match self.usage.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         usage.get(tenant_id).map(|q| (q.daily_calls, q.monthly_calls, q.total_cost_usd))
     }
 }

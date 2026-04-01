@@ -19,15 +19,22 @@ interface StagingTableProps {
     partners: Partner[];
     onConfirm: (entries: JournalEntry[]) => void;
     onCancel?: () => void;
+    onUpdate?: (data: any[]) => void; // Add this sync callback
 }
 
-export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onConfirm, onCancel }) => {
+export const StagingTable: React.FC<StagingTableProps> = ({ 
+    data, 
+    partners, 
+    onConfirm, 
+    onCancel,
+    onUpdate 
+}) => {
     
     // Convert AI semantic tags (acc_xxx) to readable names
 
 
     const context = useContext(AccountingContext) as any;
-    const { addPartner, addAsset, config, accounts } = context;
+    const { addPartner, addAsset, config, accounts, onUserOverride, inferAccount, checkDuplicate } = context;
 
     // Convert AI semantic tags (acc_xxx) to readable names
     const getDisplayAccountName = (rawName: string | undefined): string => {
@@ -64,6 +71,50 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
     const [validationResult, setValidationResult] = useState<any>(null);
     const [isValidating, setIsValidating] = useState(false);
     const [filterMode, setFilterMode] = useState<'all' | 'critical'>('all');
+
+    // [Antigravity Persistence] Sync local state back to parent/context
+    React.useEffect(() => {
+        if (onUpdate) onUpdate(stagedData);
+    }, [stagedData, onUpdate]);
+
+    // --- Cortex Auto-Enhancement hook ---
+    // This ensures that even "Fresh" uploads (from OCR)
+    // get matched with Vendor Memory immediately.
+    React.useEffect(() => {
+        const enhanceNewItems = async () => {
+            let changed = false;
+            const updated = await Promise.all(stagedData.map(async (item) => {
+                // If it's a fresh item (no audit trail mention of memory yet)
+                const isEnhanced = item.auditTrail?.some(log => log.includes('[Cortex]'));
+                
+                if (!isEnhanced && item.vendor) {
+                    const mem = await inferAccount(item);
+                    if (mem.source === 'memory') {
+                        changed = true;
+                        return {
+                            ...item,
+                            entryType: (mem.entryType || item.entryType) as any,
+                            accountName: mem.account || item.accountName,
+                            debitAccount: mem.account || item.debitAccount || item.accountName,
+                            creditAccount: mem.creditAccount || item.creditAccount,
+                            reasoning: mem.reason,
+                            confidence: 'High' as const,
+                            auditTrail: [...(item.auditTrail || []), `[Cortex] Auto-applied memory: ${mem.reason}`]
+                        };
+                    }
+                }
+                return item;
+            }));
+
+            if (changed) {
+                setStagedData([...updated]);
+            }
+        };
+
+        if (stagedData.length > 0) {
+            enhanceNewItems();
+        }
+    }, [stagedData.length]); // Run only when new items are added
 
     // --- Validation Logic ---
     const validateCompositeEntries = () => {
@@ -155,15 +206,22 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 const tx = result.transaction;
                 const newTrail = [...(tx.auditTrail || []), `[${new Date().toLocaleTimeString()}] AI 정밀 재분석 완료`];
 
+                // --- Cortex Memory Overlay ---
+                const mem = await inferAccount(tx);
+                
                 newData[i] = {
                     ...tx,
                     date: (tx.date || row.date || '').toString(),
                     amount: Number(tx.amount || row.amount || 0),
                     vat: Number(tx.vat || row.vat || 0),
                     description: (tx.description || row.description || '').toString(),
-                    entryType: (tx.entryType || row.entryType || 'Expense') as any,
-                    reasoning: (tx.reasoning || row.reasoning || '').toString(),
-                    auditTrail: newTrail
+                    entryType: (mem.entryType || tx.entryType || row.entryType || 'Expense') as any,
+                    accountName: mem.account || tx.accountName || '',
+                    debitAccount: mem.account || tx.debitAccount || tx.accountName,
+                    creditAccount: mem.creditAccount || tx.creditAccount || '',
+                    reasoning: mem.source === 'memory' ? mem.reason : (tx.reasoning || row.reasoning || '').toString(),
+                    confidence: mem.source === 'memory' ? 'High' : (tx.confidence || 'Medium') as any,
+                    auditTrail: [...newTrail, mem.source === 'memory' ? `[Cortex] Applied vendor memory suggestion` : '']
                 } as ParsedTransaction;
                 setStagedData([...newData]);
             }
@@ -179,16 +237,33 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
 
         try {
             console.log('[Mass AI] 시작:', stagedData.length, '건');
-            const result = await processMassBatch(stagedData);
-            console.log('[Mass AI] 완료:', result);
+            const resultList = await processMassBatch(stagedData);
+            console.log('[Mass AI] 완료:', resultList);
 
-            // 결과 강제 반영
-            setStagedData([...result]);
+            // --- Cortex Memory Overlay for Mass Results ---
+            const enrichedResults = await Promise.all(resultList.map(async (tx) => {
+                const mem = await inferAccount(tx);
+                if (mem.source === 'memory') {
+                    return {
+                        ...tx,
+                        entryType: (mem.entryType || tx.entryType) as any,
+                        accountName: mem.account || tx.accountName,
+                        debitAccount: mem.account || tx.debitAccount,
+                        creditAccount: mem.creditAccount || tx.creditAccount,
+                        reasoning: mem.reason,
+                        confidence: 'High' as const,
+                        auditTrail: [...(tx.auditTrail || []), `[Cortex] Memory hit: ${mem.reason}`]
+                    };
+                }
+                return tx;
+            }));
+
+            setStagedData([...enrichedResults]);
             setProcessProgress(null);
 
             // 성공 알림
-            const enhancedCount = result.filter(r => r.accountName).length;
-            alert(`AI 분석 완료! ${enhancedCount}/${result.length}건의 계정과목이 자동 분류되었습니다.`);
+            const enhancedCount = enrichedResults.filter(r => r.accountName).length;
+            alert(`AI 분석 완료! ${enhancedCount}/${enrichedResults.length}건의 계정과목이 자동 분류되었습니다.`);
         } catch (error) {
             console.error('[Mass AI] 실패:', error);
             alert(`대량 처리 중 오류가 발생했습니다:\n${error instanceof Error ? error.message : String(error)}`);
@@ -202,6 +277,12 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
         const tx = stagedData[idx];
         const isJournalReady = tx.isJournalMode || (tx.debitAccount && tx.creditAccount);
         
+        const duplicateEntry = checkDuplicate ? checkDuplicate(tx as any) : null;
+        if (duplicateEntry) {
+            const confirmed = window.confirm(`⚠️ 중복 입력 경고\n\n조회 결과, 동일한 거래(${tx.date}, ${tx.vendor}, ${tx.amount.toLocaleString()}원)가 이미 장부에 등록되어 있습니다.\n\n정말로 중복으로 한 번 더 입력하시겠습니까?`);
+            if (!confirmed) return;
+        }
+
         if (!tx.accountName && !isJournalReady) {
             alert('계정과목을 먼저 지정해야 합니다.');
             return;
@@ -228,7 +309,15 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
             // Default Mapping 보강
             if (!debitAccount) debitAccount = '미지정 계정';
             if (!creditAccount) {
-                creditAccount = tx.entryType === 'Revenue' ? '현금/보통예금' : '미지급금';
+                const isCheckCard = tx.description?.toLowerCase().includes('체크') || 
+                                   tx.description?.toLowerCase().includes('check') ||
+                                   tx.reasoning?.includes('체크');
+                
+                if (isCheckCard) {
+                    creditAccount = '보통예금';
+                } else {
+                    creditAccount = tx.entryType === 'Revenue' ? '현금/보통예금' : '미지급금';
+                }
             }
 
             const entry: JournalEntry = {
@@ -246,6 +335,11 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 attachmentUrl: (tx as any).attachmentUrl,
                 auditTrail: [...(tx.auditTrail || []), `Confirmed to Ledger (Single) on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]
             };
+
+            // [Learning] Trigger immediate vendor memory update
+            if (onUserOverride && entry.vendor) {
+                onUserOverride(entry.vendor, entry.debitAccount, entry.creditAccount, entry.type);
+            }
 
             onConfirm([entry]);
             
@@ -343,6 +437,22 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 {/* Main Grid */}
                 <div className="lg:col-span-2 xl:col-span-3 professional-card overflow-hidden">
                     <div className="overflow-x-auto max-h-[750px] scrollbar-thin scrollbar-thumb-white/10">
+                        {stagedData.some(row => checkDuplicate ? checkDuplicate(row as any) : false) && (
+                            <div className="p-4 bg-rose-500/10 border-b border-rose-500/20 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-rose-500/20 rounded-lg text-rose-500">
+                                        <AlertTriangle size={20} className="animate-pulse" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-black text-white">동일 거래 중복 감지 (Duplicate Found)</p>
+                                        <p className="text-[11px] font-bold text-rose-400 opacity-80 uppercase tracking-widest">장부에 등록된 거래와 데이터가 일치하는 항목이 있습니다.</p>
+                                    </div>
+                                </div>
+                                <div className="px-4 py-1.5 bg-rose-500 text-white text-[10px] font-black rounded-lg uppercase shadow-lg shadow-rose-500/20">
+                                    Security Check Required
+                                </div>
+                            </div>
+                        )}
                         <table className="w-full text-sm text-left border-collapse">
                             <thead className="sticky top-0 bg-[#151D2E] z-10 border-b border-white/5">
                                 <tr className="text-slate-500 font-black uppercase text-[10px] tracking-widest">
@@ -357,15 +467,18 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                             <tbody className="divide-y divide-white/5">
                                 {displayData.map((row, dIdx) => {
                                     const idx = row.originalIndex;
+                                    const isDuplicate = checkDuplicate ? checkDuplicate(row as any) : null;
                                     return (
                                         <tr
                                             key={idx}
                                             onClick={() => setSelectedRow(idx)}
-                                            className={`transition-all cursor-pointer ${idx === analyzingIndex ? 'bg-indigo-500/5' : ''} ${selectedRow === idx ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'}`}
+                                            className={`transition-all cursor-pointer ${idx === analyzingIndex ? 'bg-indigo-500/5' : ''} ${selectedRow === idx ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'} ${isDuplicate ? 'bg-rose-500/[0.03]' : ''}`}
                                         >
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
-                                                    {row.needsClarification || row.confidence !== 'High' ? (
+                                                    {isDuplicate ? (
+                                                        <AlertTriangle size={16} className="text-rose-500 animate-pulse" />
+                                                    ) : row.needsClarification || row.confidence !== 'High' ? (
                                                         <div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)] animate-pulse" />
                                                     ) : (
                                                         <div className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -644,59 +757,55 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                 </div>
                             )}
 
-                            {/* Persistent Edit Section */}
+                            {/* Persistent Edit Section (복식부기 전표 UI 복원) */}
                             <div className="bg-[#0B1221] rounded-2xl p-4 border border-white/5 space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">Account (계정과목)</label>
-                                    <input
-                                        list="staging-account-list"
-                                        value={getDisplayAccountName(stagedData[selectedRow].accountName) || stagedData[selectedRow].accountName || ""}
-                                        onChange={(e) => {
-                                            const newData = [...stagedData];
-                                            newData[selectedRow].accountName = e.target.value;
-                                            newData[selectedRow].needsClarification = false;
-                                            newData[selectedRow].confidence = "High";
-                                            newData[selectedRow].reasoning = "사용자 수동 입력";
-                                            setStagedData(newData);
-                                        }}
-                                        placeholder={stagedData[selectedRow].isJournalMode ? "Primary Account (Optional in Journal Mode)" : "계정과목을 입력하거나 선택하세요..."}
-                                        className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white font-bold text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
-                                    />
+                                <div className="p-5 bg-black/40 border border-white/5 rounded-[1.5rem] space-y-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <Calculator size={14} className="text-indigo-400" />
+                                        <span className="text-[10px] font-black text-white uppercase tracking-widest">Journal Entry Editor (복식 분개 편집)</span>
+                                    </div>
                                     
-                                    {stagedData[selectedRow].isJournalMode && (
-                                        <div className="grid grid-cols-2 gap-4 pt-2">
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-emerald-400 uppercase tracking-wider block ml-1">Debit Account (차변)</label>
-                                                <input
-                                                    value={getDisplayAccountName(stagedData[selectedRow].debitAccount) || stagedData[selectedRow].debitAccount || ""}
-                                                    onChange={(e) => {
-                                                        const newData = [...stagedData];
-                                                        newData[selectedRow].debitAccount = e.target.value;
-                                                        setStagedData(newData);
-                                                    }}
-                                                    className="w-full px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
-                                                />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-rose-400 uppercase tracking-wider block ml-1">Credit Account (대변)</label>
-                                                <input
-                                                    value={getDisplayAccountName(stagedData[selectedRow].creditAccount) || stagedData[selectedRow].creditAccount || ""}
-                                                    onChange={(e) => {
-                                                        const newData = [...stagedData];
-                                                        newData[selectedRow].creditAccount = e.target.value;
-                                                        setStagedData(newData);
-                                                    }}
-                                                    className="w-full px-3 py-2 bg-rose-500/5 border border-rose-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-rose-500 outline-none"
-                                                />
-                                            </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1.5">
+                                            <label className="text-[9px] font-black text-emerald-400 uppercase tracking-wider block ml-1 flex items-center gap-1">
+                                                <Plus size={10} /> 차변 (DEBIT)
+                                            </label>
+                                            <input
+                                                list="staging-account-list"
+                                                value={getDisplayAccountName(stagedData[selectedRow].debitAccount || stagedData[selectedRow].accountName) || ""}
+                                                onChange={(e) => {
+                                                    const newData = [...stagedData];
+                                                    newData[selectedRow].debitAccount = e.target.value;
+                                                    newData[selectedRow].accountName = e.target.value; // Sync with primary
+                                                    setStagedData(newData);
+                                                }}
+                                                placeholder="비용/자산 계정..."
+                                                className="w-full px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-white font-bold text-xs focus:ring-2 focus:ring-emerald-500/50 outline-none transition-all"
+                                            />
                                         </div>
-                                    )}
-                                    <datalist id="staging-account-list">
-                                        {ALL_ACCOUNTS.map(acc => (
-                                            <option key={acc.code} value={acc.name}>{acc.name} ({acc.code} - {acc.description})</option>
-                                        ))}
-                                    </datalist>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[9px] font-black text-rose-400 uppercase tracking-wider block ml-1 flex items-center gap-1">
+                                                <TrendingDown size={10} /> 대변 (CREDIT)
+                                            </label>
+                                            <input
+                                                list="staging-account-list"
+                                                value={getDisplayAccountName(stagedData[selectedRow].creditAccount) || stagedData[selectedRow].creditAccount || ""}
+                                                onChange={(e) => {
+                                                    const newData = [...stagedData];
+                                                    newData[selectedRow].creditAccount = e.target.value;
+                                                    setStagedData(newData);
+                                                }}
+                                                placeholder={stagedData[selectedRow].description?.includes('체크') ? '보통예금' : '미지급금/현금...'}
+                                                className="w-full px-3 py-2 bg-rose-500/5 border border-rose-500/20 rounded-xl text-white font-bold text-xs focus:ring-2 focus:ring-rose-500/50 outline-none transition-all"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
+                                <datalist id="staging-account-list">
+                                    {ALL_ACCOUNTS.map(acc => (
+                                        <option key={acc.code} value={acc.name}>{acc.name} ({acc.code})</option>
+                                    ))}
+                                </datalist>
 
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">

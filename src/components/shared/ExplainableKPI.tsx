@@ -102,7 +102,7 @@ export const ExplainableKPI: React.FC<ExplainableKPIProps> = ({
                                         <Calculator size={14} /> 계산 근거 분석 (Calculation Analysis)
                                     </p>
                                     <div className="space-y-2">
-                                        {Object.entries(result.inputs).map(([key, val]) => (
+                                        {Object.entries(result.inputs ?? {}).map(([key, val]) => (
                                             <div key={key} className="flex justify-between items-center text-[12px]">
                                                 <span className="text-slate-500 font-bold">{key}</span>
                                                 <span className="text-white font-mono">{typeof val === 'number' ? val.toLocaleString() : val}</span>

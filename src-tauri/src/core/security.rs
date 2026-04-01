@@ -25,11 +25,17 @@ pub struct SecurityGuard;
 impl SecurityGuard {
     /// 현재 세션의 테넌트 ID 설정
     pub fn set_tenant_context(tenant_id: String) {
-        let mut lock = CURRENT_TENANT.write().unwrap();
+        let mut lock = match CURRENT_TENANT.write() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
         *lock = Some(tenant_id.clone());
         
         // 키가 없으면 자동 생성 (On-boarding 시나리오)
-        let mut vault = KEY_VAULT.write().unwrap();
+        let mut vault = match KEY_VAULT.write() {
+            Ok(v) => v,
+            Err(p) => p.into_inner(),
+        };
         if !vault.contains_key(&tenant_id) {
             let new_key = Self::generate_chaotic_key(&tenant_id);
             vault.insert(tenant_id.clone(), new_key);
@@ -39,7 +45,10 @@ impl SecurityGuard {
 
     /// 현재 작업이 허용된 테넌트인지 검증
     pub fn validate_tenant(requested_id: &str) -> Result<(), String> {
-        let lock = CURRENT_TENANT.read().unwrap();
+        let lock = match CURRENT_TENANT.read() {
+            Ok(l) => l,
+            Err(p) => p.into_inner(),
+        };
         match &*lock {
             Some(curr_id) if curr_id == requested_id => Ok(()),
             None => {
@@ -52,7 +61,10 @@ impl SecurityGuard {
 
     /// 테넌트 전용 암호화 키 조회 (AES-256 호환)
     pub fn get_tenant_key(tenant_id: &str) -> String {
-        let vault = KEY_VAULT.read().unwrap();
+        let vault = match KEY_VAULT.read() {
+            Ok(v) => v,
+            Err(p) => p.into_inner(),
+        };
         if let Some(key) = vault.get(tenant_id) {
             // [Audit Log] Key Access
             // println!("[Audit] Key accessed for tenant {}", tenant_id); 

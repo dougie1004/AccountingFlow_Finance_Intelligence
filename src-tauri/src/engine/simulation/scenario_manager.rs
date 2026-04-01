@@ -25,7 +25,7 @@ impl ScenarioManager {
         
         // Parse selected_date for cutoff
         let projection_cutoff = chrono::NaiveDate::parse_from_str(&selected_date, "%Y-%m-%d")
-            .unwrap_or(chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap_or(chrono::NaiveDate::MIN));
 
         let mut last_actual_date: Option<chrono::NaiveDate> = None;
 
@@ -39,7 +39,7 @@ impl ScenarioManager {
 
             if let Ok(d) = parsed_date {
                 // Tracking last actual date as the anchor for simulation
-                if last_actual_date.is_none() || d > last_actual_date.unwrap() {
+                if last_actual_date.is_none() || Some(d) > last_actual_date {
                     last_actual_date = Some(d);
                 }
 
@@ -75,7 +75,13 @@ impl ScenarioManager {
                 next_m -= 12;
             }
             
-            let future_date = chrono::NaiveDate::from_ymd_opt(next_y, next_m as u32, 28).unwrap();
+            let future_date = match chrono::NaiveDate::from_ymd_opt(next_y, next_m as u32, 28) {
+                Some(d) => d,
+                None => {
+                    eprintln!("[ScenarioManager] Date overflow at {}-{}. Skipping month.", next_y, next_m);
+                    continue;
+                }
+            };
             
             // [Safety Guard] NEVER generate entries before the anchor
             if future_date <= anchor { continue; }

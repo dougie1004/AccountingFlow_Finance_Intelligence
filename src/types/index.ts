@@ -46,6 +46,9 @@ export interface JournalEntry {
     // [Antigravity] Safe-Parser Fields
     parseStatus?: ParseStatus;
     rawDataSnapshot?: string;
+    inferredFromMemory?: boolean; 
+    inferenceSource?: 'memory' | 'ai' | 'manual'; // [Explainable Finance]
+    inferenceReason?: string; // [Explainable Finance] 
 
     // [Step 1] Payroll/Insurance Splitting
     transactionGroupId?: string;
@@ -101,6 +104,13 @@ export interface Asset {
     expenseAccount?: string;
 }
 
+export interface VendorAccountMap {
+    vendorName: string; // [PK] Normalized Name
+    account: string;    // Account Name
+    usageCount: number;
+    lastUsedAt: string; // ISO 8601
+}
+
 export interface ValidationResult {
     status: 'Success' | 'Warning' | 'Critical';
     message: string;
@@ -147,6 +157,9 @@ export interface FinancialSummary {
     deltaInventory: number;
     workingCapitalVariation: number;
     totalGrantCash: number;
+    grossBurn: number;  // [V3] Total Invoiced/Spent
+    inflow: number;     // [V3] Total Revenue/Collected
+    payrollExpenses: number; // [V5] Calculated for tactical actions
 }
 
 export type AccountNature = 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
@@ -340,6 +353,8 @@ export interface ParsedTransaction {
     parseStatus?: ParseStatus;
     rawDataSnapshot?: string;
     parseErrorMsg?: string;
+    inferenceSource?: 'memory' | 'ai' | 'manual';
+    inferenceReason?: string;
 
     // [Step 1] Payroll/Insurance Splitting
     transactionGroupId?: string;

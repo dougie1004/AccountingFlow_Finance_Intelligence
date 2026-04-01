@@ -5,7 +5,7 @@ import {
     calculateComprehensiveRisk,
     calculateProactiveCashRisk 
 } from '../riskEngine';
-import { calculateOperatingBurn } from '../metrics/metricRegistry';
+import { calculateOperatingBurn, calculateBurn } from '../metrics/metricRegistry';
 import { getNow } from '../../utils/timeContext';
 import { generateCashFlow } from './generateCashFlow';
 
@@ -72,22 +72,18 @@ export const generateRiskReport = (ledger: JournalEntry[], currentDate: string):
     };
     const currentCash = getBalance('acc_103');
 
-    // 🧩 [Burn Calculation] Strategic Compass V2.3와 동기화 (CASH BASIS + 6 MONTH WINDOW)
-    const cashFlowMonths = generateCashFlow(ledger, 0);
-    const currentYearMonth = currentDate.substring(0, 7);
-    const allHistoricalMonths = cashFlowMonths.filter(cf => cf.date <= currentYearMonth);
-    
-    const RECENT_WINDOW = 6;
-    const historicalMonths = allHistoricalMonths.slice(-RECENT_WINDOW);
-    
-    const totalOperatingIn = historicalMonths.reduce((sum, m) => sum + (m.operatingCashIn || 0), 0);
-    const totalOut = historicalMonths.reduce((sum, m) => sum + (m.cashOut || 0), 0);
-    
-    const avgIn = historicalMonths.length > 0 ? totalOperatingIn / historicalMonths.length : 0;
-    const avgOut = historicalMonths.length > 0 ? totalOut / historicalMonths.length : 0;
-    
-    const netCash = avgIn - avgOut;
-    const monthlyBurn = netCash < 0 ? Math.abs(netCash) : 0;
+    // 🧩 [Burn Calculation] SSOT: V14 Unified Logic (6 MONTH WINDOW)
+    const recentLedger = ledger.filter(e => {
+        const eDate = e.date;
+        const sixMonthsAgo = new Date(riskNow);
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        const sixMonthsAgoStr = sixMonthsAgo.toISOString().substring(0, 7);
+        return eDate <= currentDate && eDate >= sixMonthsAgoStr;
+    });
+
+    const burnResult = calculateBurn(recentLedger);
+    const monthsInWindow = 6; // Fixed 6 month window for standard burn
+    const monthlyBurn = burnResult.netBurn / (monthsInWindow || 1);
     
     // 실질 영업채무 (Net Trade Payables - Excl. VAT)
     const totalPayablesForCashFlow = riskData.ap.netReal;
@@ -120,7 +116,7 @@ export const generateRiskReport = (ledger: JournalEntry[], currentDate: string):
             blockedAmount: "지급 승인이 보류된 잠재적 부채 항목입니다.",
             unsettledLongTerm: `30일 이상 미회수 채권(₩${f(riskData.ar.overdue30.amount)}) 및 미지급 채무(₩${f(riskData.ap.overdue30.amount)}) 종합 리스크입니다. (BS 잔액 기준)`,
             clearingRisk: `[Dual-Insight 분석] 현재 매칭되지 않은 '발생 전표' 합계는 ₩${f(riskData.ar.gross + riskData.ap.gross)}이나, '지불 완료' 기록을 상계한 장부상 실질 순잔액은 ₩${f(riskData.ar.net + riskData.ap.netReal)}입니다. (재무상태표 일치율 100%)`,
-            cashRisk: `최근 ${historicalMonths.length}개월 평균 캐시 번레이트(₩${f(monthlyBurn)}) 기준 3개월치 자금 대비 '순 유동성'의 부족분입니다. (현금 - 영업채무 상계 기준)`
+            cashRisk: `최근 ${monthsInWindow}개월 평균 캐시 번레이트(₩${f(monthlyBurn)}) 기준 3개월치 자금 대비 '순 유동성'의 부족분입니다. (현금 - 영업채무 상계 기준)`
         }
     };
 };

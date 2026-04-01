@@ -6,12 +6,13 @@ import { JournalEntry, ParsedTransaction } from '../types';
 import { ALL_ACCOUNTS } from '../constants/accounts';
 import { cleanMarkdown } from '../utils/textUtils';
 import { EvidenceViewer } from '../components/EvidenceViewer';
+import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 
 const ApprovalDesk: React.FC = () => {
     const { 
         ledger, approveEntry, deleteEntry, bulkApprove, 
         addEntries, updateEntry, acceptVatSuggestion,
-        addAccount
+        addAccount, selectedDate, setSelectedDate
     } = useAccounting();
     const [viewMode, setViewMode] = useState<'card' | 'grid'>('card');
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -113,7 +114,7 @@ const ApprovalDesk: React.FC = () => {
                     ]
                 }));
 
-                addEntries(newEntries);
+                await addEntries(newEntries);
                 setIsImporting(false);
             };
             reader.readAsText(file);
@@ -144,6 +145,11 @@ const ApprovalDesk: React.FC = () => {
                                 {type === 'all' ? '전체' : type === 'Sales' ? '매출' : type === 'Expense' ? '매입/비용' : '자산'}
                             </button>
                         ))}
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-[#151D2E] px-4 py-1.5 rounded-xl border border-white/5 shadow-xl">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">분석 기준일:</span>
+                        <PremiumDatePicker value={selectedDate} onChange={setSelectedDate} />
                     </div>
 
                     <div className="flex bg-[#151D2E] p-1 rounded-xl border border-white/5">
@@ -305,6 +311,13 @@ const ApprovalDesk: React.FC = () => {
                                                     AI Integrity: {entry.amount > 5000000 ? '94%' : '99.8%'}
                                                 </div>
 
+                                                {entry.inferredFromMemory && (
+                                                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase tracking-tight">
+                                                        <CheckCircle2 size={10} />
+                                                        Vendor Memory 기반
+                                                    </div>
+                                                )}
+
                                                 {isNeedConfirm && (
                                                     <span className="flex items-center gap-1 bg-rose-500 text-white text-[10px] font-black px-2.5 py-1 rounded-lg uppercase shadow-lg shadow-rose-500/20 animate-bounce">
                                                         <AlertTriangle size={10} /> 데이터 무결성 위험
@@ -337,9 +350,17 @@ const ApprovalDesk: React.FC = () => {
                                             <div className="grid grid-cols-2 gap-4 p-4 rounded-2xl bg-white/5 border border-white/10 mt-2">
                                                 <div className="space-y-1 border-r border-white/5 pr-4 text-left">
                                                     <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest block mb-2">Debit (차변)</span>
-                                                    <div className="text-base font-black text-white font-mono break-all leading-tight italic">
-                                                        {entry.debitAccount}
-                                                    </div>
+                                                    <select
+                                                        value={entry.debitAccount}
+                                                        onChange={(e) => updateEntry(entry.id, { debitAccount: e.target.value })}
+                                                        className="w-full bg-transparent border-none text-base font-black text-white font-mono leading-tight italic focus:ring-0 outline-none p-0 cursor-pointer hover:text-indigo-400 transition-colors"
+                                                    >
+                                                        {ALL_ACCOUNTS.map(acc => (
+                                                            <option key={acc.code} value={acc.name} className="bg-[#151D2E] text-white">
+                                                                {acc.name} ({acc.code})
+                                                            </option>
+                                                        ))}
+                                                    </select>
                                                     <p className="text-[15px] font-black text-white/50 pt-2 border-t border-white/5 font-mono">
                                                         ₩{entry.amount.toLocaleString()}
                                                     </p>
@@ -531,9 +552,17 @@ const ApprovalDesk: React.FC = () => {
                                                 />
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-black text-indigo-300 font-mono italic">
-                                                    {entry.debitAccount}
-                                                </div>
+                                                <select
+                                                    value={entry.debitAccount}
+                                                    onChange={(e) => updateEntry(entry.id, { debitAccount: e.target.value })}
+                                                    className="bg-transparent border-none text-sm font-black text-indigo-300 font-mono italic focus:ring-0 outline-none p-0 cursor-pointer hover:text-white"
+                                                >
+                                                    {ALL_ACCOUNTS.map(acc => (
+                                                        <option key={acc.code} value={acc.name} className="bg-[#151D2E] text-white">
+                                                            {acc.name}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </td>
                                             <td className="px-6 py-4 max-w-xs truncate text-[13px] font-bold text-slate-400">
                                                 {entry.description}

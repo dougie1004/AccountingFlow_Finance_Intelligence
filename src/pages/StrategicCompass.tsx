@@ -25,7 +25,6 @@ import {
     calculateSequentialRunway,
     calculateCashRunway,
     calculateCashBurn,
-    calculateCashBurnBreakdown,
     calculateOperatingBurn
 } from '../core/metrics/metricRegistry';
 import {
@@ -179,7 +178,7 @@ export function getEquitySignal(runwayMonths?: number) {
 const StrategicCompass: React.FC = () => {
     const {
         ledger: globalLedger,
-        financials,
+        scenarioFinancials: financials,
         selectedDate,
         accounts,
         setBaselineSnapshot,
@@ -202,7 +201,9 @@ const StrategicCompass: React.FC = () => {
         setBaselineEntries,
         baselineEntries,
         setBaselineTimestamp,
-        baselineTimestamp
+        baselineTimestamp,
+        dataReliability,
+        tacticalActions
     } = useAccounting();
 
     const [actualLedger, setActualLedger] = useState<JournalEntry[]>([]);
@@ -429,9 +430,21 @@ const StrategicCompass: React.FC = () => {
     const chartData = engineResult?.chartData ?? legacyChartData ?? [];
 
     const nowIndex = useMemo(() => chartData.findIndex(d => d.isNow), [chartData]);
-    const cashOutX = useMemo(() => (stats?.cashOutMonth && chartData[stats.cashOutMonth]) ? chartData[stats.cashOutMonth].month : null, [stats?.cashOutMonth, chartData]);
-    const bepX = useMemo(() => (breakEvenMonth != null && chartData[breakEvenMonth]) ? chartData[breakEvenMonth].month : null, [breakEvenMonth, chartData]);
-    const equityX = useMemo(() => (stats?.cashOutMonth && chartData.length) ? chartData[Math.max(stats.cashOutMonth - 6, 0)]?.month : null, [stats?.cashOutMonth, chartData]);
+    const cashOutX = useMemo(() => {
+        if (stats?.cashOutMonth == null || !chartData[stats.cashOutMonth]) return null;
+        return chartData[stats.cashOutMonth].month;
+    }, [stats?.cashOutMonth, chartData]);
+
+    const bepX = useMemo(() => {
+        if (breakEvenMonth == null || !chartData[breakEvenMonth]) return null;
+        return chartData[breakEvenMonth].month;
+    }, [breakEvenMonth, chartData]);
+
+    const equityX = useMemo(() => {
+        if (stats?.cashOutMonth == null || chartData.length === 0) return null;
+        const targetIdx = Math.max(stats.cashOutMonth - 6, 0);
+        return chartData[targetIdx]?.month || null;
+    }, [stats?.cashOutMonth, chartData]);
 
     const equityAnalysis = useMemo(() => {
         if (!stats || !ssotMetrics.cashflow || nowIndex === -1) return null;
@@ -470,7 +483,14 @@ const StrategicCompass: React.FC = () => {
 
     const fundingEvent = useMemo(() => {
         if (!equityAnalysis || !chartData || equityAnalysis.fundingIndex === -1) return null;
-        return { index: equityAnalysis.fundingIndex, date: chartData[equityAnalysis.fundingIndex]?.month, failDate: equityAnalysis.failIndex !== -1 ? chartData[equityAnalysis.failIndex]?.month : null, fundingNeeded: equityAnalysis.fundingNeeded, remainingRunway: equityAnalysis.fundingRemainingRunway, reason: equityAnalysis.fundingReason };
+        return { 
+            index: equityAnalysis.fundingIndex, 
+            date: (equityAnalysis.fundingIndex !== -1 && chartData[equityAnalysis.fundingIndex]) ? chartData[equityAnalysis.fundingIndex].month : null, 
+            failDate: (equityAnalysis.failIndex !== -1 && chartData[equityAnalysis.failIndex]) ? chartData[equityAnalysis.failIndex].month : null, 
+            fundingNeeded: equityAnalysis.fundingNeeded, 
+            remainingRunway: equityAnalysis.fundingRemainingRunway, 
+            reason: equityAnalysis.fundingReason 
+        };
     }, [chartData, equityAnalysis]);
 
     const fundingX = fundingEvent?.date || null;
@@ -485,14 +505,18 @@ const StrategicCompass: React.FC = () => {
                     </div>
                     <div>
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <span className="text-[10px] font-black text-white bg-emerald-500 px-3 py-1 rounded-full uppercase tracking-widest">CASH VIEW</span>
-                            <span className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-blue-500/20">Experimental Strategy Mode</span>
+                            <span className="text-[10px] font-black text-white bg-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest border border-indigo-400/30">
+                                Simulation Center
+                            </span>
+                            <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg uppercase tracking-widest border border-indigo-500/20">
+                                SCENARIO (SIMULATION)
+                            </span>
                         </div>
-                        <h1 className="text-4xl font-black text-white tracking-tighter italic">전략 나침반 <span className="text-slate-500 text-xl font-bold not-italic ml-2">(Strategic Compass v2.6)</span></h1>
+                        <h1 className="text-4xl font-black text-white tracking-tighter italic uppercase">전략 나침반</h1>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
-                    <button onClick={() => { setRevenueMult(1.0); setExpenseMult(1.0); setFixedCostDelta(0); setScenarioLedger([]); setBaselineEntries([]); }} className="h-12 px-5 bg-[#1A1F2B] border border-white/5 rounded-xl text-[10px] font-black text-white hover:bg-[#252B3A] transition-all uppercase tracking-widest">초기화</button>
+                    <button onClick={handleReset} className="h-12 px-5 bg-[#1A1F2B] border border-white/5 rounded-xl text-[10px] font-black text-white hover:bg-[#252B3A] transition-all uppercase tracking-widest">초기화</button>
                     <button onClick={handleSaveStrategy} className="h-12 px-5 bg-[#1A1F2B] border border-white/5 rounded-xl text-[10px] font-black text-white hover:bg-[#252B3A] transition-all uppercase tracking-widest">저장</button>
                     <button onClick={handleExportAll} disabled={loading} className="h-12 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl text-[10px] font-black text-white shadow-lg transition-all uppercase tracking-widest">엑스포트</button>
                 </div>
@@ -507,14 +531,24 @@ const StrategicCompass: React.FC = () => {
                             </div>
                             <div>
                                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">CFO Intelligence</p>
-                                <h3 className={`${advice?.color ?? "text-slate-100"} text-2xl font-black italic uppercase tracking-tighter`}>{advice?.label ?? "분석 대기 중"}</h3>
-                                <h4 className="text-xl font-black text-white italic tracking-tight mt-1">"{advice?.message ?? "시나리오를 조정하여 인텔리전스를 활성화하세요."}"</h4>
+                                <h3 className={`${advice?.color ?? "text-slate-100"} text-2xl font-black italic uppercase tracking-tighter`}>
+                                    {advice?.label ?? (scenarioLedger?.length > 0 ? "시나리오 분석 기반" : "실제 장부 분석 기반")}
+                                </h3>
+                                <h4 className="text-xl font-black text-white italic tracking-tight mt-1 truncate max-w-2xl">
+                                    "{advice?.message ?? (scenarioLedger?.length > 0 ? "시뮬레이션이 활성화되었습니다." : "실시간 장부 데이터를 분석 중입니다. 슬라이더를 조정해보세요.")}"
+                                </h4>
                             </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-10">
                             <ExplainableKPI
                                 label="최근 평균 현금 소진액"
-                                result={{ value: Math.abs(burnBreakdown?.netCashAvg || 0), formula: 'Cash In - Cash Out (Avg)', period: 'Recent 6m', dataSource: 'scenario' }}
+                                result={{ 
+                                    value: Math.abs(burnBreakdown?.netCashAvg || 0), 
+                                    formula: 'Cash In - Cash Out (Avg)', 
+                                    period: 'Recent 6m', 
+                                    dataSource: scenarioLedger?.length > 0 ? 'scenario' : 'actual',
+                                    inputs: {}
+                                }}
                                 color={burnBreakdown?.isBurning ? "text-rose-500" : "text-emerald-400"}
                                 formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>}
                             />
@@ -522,13 +556,105 @@ const StrategicCompass: React.FC = () => {
                     </div>
                 </section>
 
-                {/* 🚫 DO NOT add new burn models or burn bridge logic here. Use stats only. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExplainableKPI label="💸 Survival Runway" result={stats?.liquidityRunway || null} color={survivalRunway >= 6 ? 'text-blue-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
-                    <ExplainableKPI label="📈 Strategic Runway" result={stats?.runway || null} color={strategicRunway >= 12 ? 'text-emerald-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
-                    <ExplainableKPI label="흑자 전환 시점" result={{ value: breakEvenMonth || 0, formula: 'Scenario Net Income > 0 Check', period: 'Simulation', dataSource: 'scenario' } as any} color="text-indigo-400" formatValue={(v) => <span className="text-xl font-black italic">{breakEvenMonth != null ? `${breakEvenMonth}개월` : "N/A"}</span>} />
-                    <ExplainableKPI label="Gross Burn" result={{ value: grossBurn, formula: 'Avg Cash Outflow', period: 'Recent 6m', dataSource: 'scenario' } as any} color="text-slate-400" formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>} />
+                    <ExplainableKPI 
+                        label="💸 Runway (시뮬레이션)" 
+                        result={{ 
+                            value: financials.cash / (financials.grossBurn - financials.inflow || 1), 
+                            dataSource: 'scenario' as any,
+                            inputs: { '시뮬레이션 현금': financials.cash, '시나리오 순소모액': financials.grossBurn - financials.inflow },
+                            formula: 'Simulated Cash / (Simulated Gross Burn - Simulated Inflow)',
+                            period: 'Simulation Period (Projection)'
+                        }} 
+                        description="선택한 전략과 거시 지표가 반영된 미래 런웨이 예측치입니다."
+                        color="text-indigo-400" 
+                        formatValue={(v) => <span className="text-xl font-black italic">{(v === Infinity || v > 60) ? "지속 가능" : `${v.toFixed(1)}개월`}</span>} 
+                    />
+                    <ExplainableKPI 
+                        label="🔥 Burn (시뮬레이션)" 
+                        result={{ 
+                            value: Math.max(financials.grossBurn - financials.inflow, 0), 
+                            dataSource: 'scenario' as any,
+                            inputs: { 'Projected In': financials.inflow, 'Projected Out': financials.grossBurn },
+                            formula: 'Projected Outflow - Projected Inflow',
+                            period: 'Simulation Strategy Period'
+                        }} 
+                        description="성장 전략과 비용 절감률이 반영된 예상 월간 순 소진액입니다."
+                        color="text-rose-500"
+                        formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>}
+                    />
+                    <ExplainableKPI 
+                        label="예상 매출 (Projected)" 
+                        result={{ 
+                            value: financials.revenue, 
+                            dataSource: 'scenario' as any,
+                            inputs: { 'Base Revenue': financials.revenue / (revenueMult || 1), 'Mult': revenueMult },
+                            formula: 'Base Revenue * Growth Multiplier',
+                            period: 'Scenario End Date'
+                        }} 
+                        description="전략 시뮬레이션 종료 시점의 예상 매출 규모입니다."
+                        color="text-emerald-400" 
+                        formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>} 
+                    />
+                    <ExplainableKPI 
+                        label="예상 지출 (Projected)" 
+                        result={{ 
+                            value: financials.expenses, 
+                            dataSource: 'scenario' as any,
+                            inputs: { 'Fixed Delta': fixedCostDelta, 'Mult': expenseMult },
+                            formula: '(Base Expenses * Reduction Mult) + Fixed Delta',
+                            period: 'Scenario End Date'
+                        }} 
+                        description="변동비와 전략적 지출이 모두 반영된 미래 비용 예상치입니다."
+                        color="text-amber-400" 
+                        formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>} 
+                    />
                 </div>
+
+                {/* [V3 Action Layer] Tactical Decision Engine UI */}
+                <section className="bg-[#121626] border border-blue-500/20 p-8 rounded-[2.5rem] shadow-3xl">
+                    <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400 border border-blue-500/20">
+                                <Zap size={20} />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-black text-white italic tracking-tight">CFO Tactical Recommendations</h3>
+                                <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Powered by Deterministic Analysis (Reliability: {dataReliability}%)</p>
+                            </div>
+                        </div>
+                        <div className="hidden md:flex items-center gap-2">
+                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-3 py-1 bg-white/5 rounded-full border border-white/10">Action Layer Active</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {(tacticalActions || []).map((action) => (
+                            <div key={action.id} className={`p-5 rounded-2xl border transition-all hover:scale-[1.02] ${
+                                action.type === 'critical' ? 'bg-rose-500/5 border-rose-500/20' :
+                                action.type === 'warning' ? 'bg-amber-500/5 border-amber-500/20' :
+                                'bg-blue-500/5 border-blue-500/20'
+                            }`}>
+                                <div className="flex justify-between items-start mb-3">
+                                    <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter ${
+                                        action.type === 'critical' ? 'bg-rose-500 text-white' :
+                                        action.type === 'warning' ? 'bg-amber-500 text-black' :
+                                        'bg-blue-600 text-white'
+                                    }`}>
+                                        {action.type}
+                                    </span>
+                                    {action.impact && (
+                                        <span className="text-[8px] font-black text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded italic">
+                                            {action.impact}
+                                        </span>
+                                    )}
+                                </div>
+                                <h4 className="text-sm font-black text-white mb-2 leading-tight">{action.label}</h4>
+                                <p className="text-[11px] font-bold text-slate-400 leading-snug">{action.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </section>
 
                 <div className="grid grid-cols-1 xl:grid-cols-10 gap-6 items-stretch">
                     <aside className="xl:col-span-3 flex flex-col gap-4 max-h-[720px] overflow-y-auto pr-2">
@@ -536,10 +662,10 @@ const StrategicCompass: React.FC = () => {
                              <h3 className="text-sm font-black text-white italic tracking-tighter uppercase mb-6 flex items-center gap-2"><TrendingUp size={16} /> Macro Environment</h3>
                              <div className="space-y-6">
                                 <SimulationSlider label="예측 기간 (Time Horizon)" val={projectionMonths} setVal={setProjectionMonths} min={3} max={60} step={3} color="accent-slate-500" suffix="개월" />
-                                <SimulationSlider label="물가상승률" val={macro.inflationRate} setVal={(v) => setMacro({ ...macro, inflationRate: v })} min={0} max={0.2} step={0.005} color="accent-rose-500" percentage />
-                                <SimulationSlider label="임금 상승률" val={macro.wageGrowthRate} setVal={(v) => setMacro({ ...macro, wageGrowthRate: v })} min={0} max={0.2} step={0.005} color="accent-emerald-500" percentage />
-                                <SimulationSlider label="기타 비용 증가율" val={macro.otherExpenseGrowth} setVal={(v) => setMacro({ ...macro, otherExpenseGrowth: v })} min={0} max={0.2} step={0.005} color="accent-amber-500" percentage />
-                                <SimulationSlider label="자연 매출 성장률" val={macro.revenueNaturalGrowth} setVal={(v) => setMacro({ ...macro, revenueNaturalGrowth: v })} min={0} max={0.3} step={0.005} color="accent-blue-500" percentage />
+                                <SimulationSlider label="물가상승률" val={macro.inflationRate} setVal={(v: number) => setMacro({ ...macro, inflationRate: v })} min={0} max={0.2} step={0.005} color="accent-rose-500" percentage />
+                                <SimulationSlider label="임금 상승률" val={macro.wageGrowthRate} setVal={(v: number) => setMacro({ ...macro, wageGrowthRate: v })} min={0} max={0.2} step={0.005} color="accent-emerald-500" percentage />
+                                <SimulationSlider label="기타 비용 증가율" val={macro.otherExpenseGrowth} setVal={(v: number) => setMacro({ ...macro, otherExpenseGrowth: v })} min={0} max={0.2} step={0.005} color="accent-amber-500" percentage />
+                                <SimulationSlider label="자연 매출 성장률" val={macro.revenueNaturalGrowth} setVal={(v: number) => setMacro({ ...macro, revenueNaturalGrowth: v })} min={0} max={0.3} step={0.005} color="accent-blue-500" percentage />
                                 <button onClick={() => handleGenerateBaseline()} disabled={loading} className={`w-full h-10 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${isBaselineStale ? 'bg-rose-600' : 'bg-emerald-600'} text-white`}>베이스라인 갱신</button>
                              </div>
                         </section>
@@ -605,7 +731,7 @@ const StrategicCompass: React.FC = () => {
                             </div>
                         </section>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                             <div className="p-8 bg-blue-500/10 border border-blue-500/20 rounded-[2.5rem] flex items-center justify-between">
                                 <div>
                                     <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">Recommended Funding Target</p>
@@ -617,6 +743,17 @@ const StrategicCompass: React.FC = () => {
                                     <p className="text-[10px] font-bold text-slate-500 mt-2 italic">Strategic Runway 확보를 위한 목표치</p>
                                 </div>
                                 <Zap size={32} className="text-blue-500" />
+                            </div>
+
+                            <div className="p-8 bg-emerald-500/10 border border-emerald-500/20 rounded-[2.5rem] flex items-center justify-between">
+                                <div>
+                                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Simulation Outcome</p>
+                                    <h4 className="text-3xl font-black text-white italic leading-none">
+                                        {strategicRunway === Infinity ? "지속 가능" : `${strategicRunway.toFixed(1)}개월`}
+                                    </h4>
+                                    <p className="text-[10px] font-bold text-slate-500 mt-2 italic">현재 시뮬레이션 기반 현금 소진 시점</p>
+                                </div>
+                                <TrendingUp size={32} className="text-emerald-400" />
                             </div>
                         </div>
                     </main>

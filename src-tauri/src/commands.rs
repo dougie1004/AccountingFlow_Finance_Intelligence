@@ -7,6 +7,7 @@ use crate::core::bank_models::BankMapping;
 use std::collections::HashMap;
 use crate::ai::ai_service;
 use crate::ai::csv_inference;
+use crate::ai::learning_engine;
 use crate::engine::simulation::projection as simulation_engine;
 use crate::engine::core::assets;
 use crate::engine::core::inventory as inventory_bridge;
@@ -505,6 +506,22 @@ pub fn load_demo_scenario() -> Vec<ParsedTransaction> {
 pub fn generate_journal_id(date: String, entry_type: String) -> String {
     let prefix = crate::utils::id_generator::determine_prefix(&entry_type);
     crate::utils::id_generator::generate_id(&date, prefix)
+}
+
+#[tauri::command]
+pub fn determine_prefix(entry_type: &str) -> crate::utils::id_generator::IdPrefix {
+    crate::utils::id_generator::determine_prefix(entry_type)
+}
+
+// [Learning Ledger] SQLite Commands
+#[tauri::command]
+pub fn get_vendor_memory_report(vendor: String) -> learning_engine::MemoryReport {
+    learning_engine::get_memory_report(&vendor)
+}
+
+#[tauri::command]
+pub fn upsert_vendor_learning(vendor: String, account: String, credit_account: Option<String>, entry_type: Option<String>) -> Result<(), String> {
+    learning_engine::upsert_learning(&vendor, &account, credit_account, entry_type).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -19,6 +19,7 @@ export const calculateFinancialsFromTB = (trialBalance: TrialBalance): Financial
     let operatingRevenue = 0;
     let grantRevenue = 0;
     let expenses = 0;
+    let payrollExpenses = 0;
 
     Object.values(trialBalance).forEach((val) => {
         const nature = val.meta.nature;
@@ -46,7 +47,13 @@ export const calculateFinancialsFromTB = (trialBalance: TrialBalance): Financial
                 if (code === '403') grantRevenue += -periodBal;
                 else operatingRevenue += -periodBal;
                 break;
-            case 'EXPENSE': expenses += periodBal; break;
+            case 'EXPENSE': 
+                expenses += periodBal;
+                // [V5] Aggregate Payroll for Tactical actions
+                if (name.includes('급여') || val.meta.section?.includes('인건비')) {
+                    payrollExpenses += periodBal;
+                }
+                break;
         }
     });
 
@@ -86,6 +93,9 @@ export const calculateFinancialsFromTB = (trialBalance: TrialBalance): Financial
         deltaInventory: inventoryValue - openingInventory, 
         workingCapitalVariation: (openingAR - ar) + (ap - openingAP) + (openingInventory - inventoryValue),
         realAvailableCash: Math.max(0, cash - ap),
-        totalGrantCash: grantRevenue 
+        totalGrantCash: grantRevenue,
+        grossBurn: expenses,
+        inflow: revenue,
+        payrollExpenses
     };
 };

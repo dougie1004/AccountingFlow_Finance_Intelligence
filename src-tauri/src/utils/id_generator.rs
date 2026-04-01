@@ -38,7 +38,13 @@ pub fn generate_id(date_str: &str, prefix: IdPrefix) -> String {
     };
 
     // 2. Atomic Increment
-    let mut map = SEQUENCE_MAP.lock().unwrap();
+    let mut map = match SEQUENCE_MAP.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            eprintln!("[IdGenerator] SEQUENCE_MAP poisoned, recovering...");
+            poisoned.into_inner()
+        }
+    };
     let counter = map.entry(date_part.clone()).or_insert(0);
     *counter += 1;
     let sequence = *counter;

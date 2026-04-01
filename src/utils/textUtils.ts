@@ -17,3 +17,12 @@ export const parseAIList = (text: string | null | undefined): string[] => {
         .map(p => cleanMarkdown(p).trim())
         .filter(p => p.length > 0);
 };
+
+export const normalizeVendor = (vendor: string | null | undefined): string => {
+    if (!vendor) return 'unknown';
+    return vendor
+        .toLowerCase()
+        .replace(/(주식회사|㈜|\(주\))/g, '')
+        .replace(/\s/g, '')
+        .trim();
+};

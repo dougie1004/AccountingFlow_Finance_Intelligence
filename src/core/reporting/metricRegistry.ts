@@ -1,4 +1,5 @@
 import { JournalEntry, TrialBalance } from '../../types';
+import { calculateRunway } from '../metrics/metricRegistry';
 
 export type MetricSource = 'actual' | 'scenario' | 'snapshot';
 
@@ -17,10 +18,9 @@ const CASH_ACCOUNTS = [
     'acc_101', // 현금
     'acc_102', // 당좌예금
     'acc_103', // 보통예금
-    'acc_104', // 정기예금
+    'acc_104', // 정기예금 (유동성)
     'acc_105', // 정기적금
     'acc_106', // 기타예금
-    'acc_108', // 단기금융상품 (유동성)
 ];
 const PAYABLE_ACCOUNTS = ['acc_251', 'acc_253']; 
 const ACCRUED_EXPENSES = ['acc_255'];           
@@ -89,28 +89,28 @@ export const MetricRegistry = {
             e.date <= selectedDate && (e.type === 'Expense' || e.type === 'Payroll')
         );
         
-        const monthlyBurn = new Map<string, number>();
+        const monthlyBurnMap = new Map<string, number>();
         expenses.forEach(e => {
             const m = e.date.substring(0, 7);
-            monthlyBurn.set(m, (monthlyBurn.get(m) || 0) + e.amount);
+            monthlyBurnMap.set(m, (monthlyBurnMap.get(m) || 0) + e.amount);
         });
 
-        const sortedBurn = Array.from(monthlyBurn.values()).slice(-3);
-        const avgBurn = sortedBurn.length > 0 
-            ? sortedBurn.reduce((a, b) => a + b, 0) / sortedBurn.length 
+        const sortedBurnValues = Array.from(monthlyBurnMap.values()).slice(-3);
+        const avgBurn = sortedBurnValues.length > 0 
+            ? sortedBurnValues.reduce((a, b) => a + b, 0) / sortedBurnValues.length 
             : 0;
 
-        if (avgBurn <= 0) return { value: 24, isInfinite: true, label: "Sustainable", inputs: {}, formula: '', period: '', dataSource: 'actual' };
-
-        const runway = Math.min(liquidity / avgBurn, 24);
+        // Use unified SSOT calculation from src/core/metrics/metricRegistry.ts
+        const runway = calculateRunway({ netLiquidity: liquidity, netBurn: avgBurn });
+        const isInfinite = runway === Infinity;
 
         return {
-            value: Math.round(runway * 10) / 10,
-            isInfinite: runway >= 24,
-            label: runway >= 24 ? "24.0+ 개월" : `${runway.toFixed(1)}개월`,
-            inputs: { '순유동성': liquidity, '평균 소모액 (최근 3개월)': avgBurn },
-            formula: '유동성 / 평균 소모액',
-            period: '최근 3개월 평균',
+            value: isInfinite ? 36 : Math.round(runway * 10) / 10,
+            isInfinite,
+            label: isInfinite ? "지속 가능" : `${runway.toFixed(1)}개월`,
+            inputs: { '순유동성': liquidity, '평금 소모액 (최근 3개월)': avgBurn },
+            formula: '유동성 / 평균 소모액 (Standardized)',
+            period: '최근 3개월 평균 (실측)',
             dataSource: 'actual'
         };
     },

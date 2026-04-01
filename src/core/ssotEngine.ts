@@ -16,7 +16,7 @@ export function generateProjectionLedger({
 
 export function buildMetrics(projectionLedger: any[]) {
   const cashflow = generateCashFlow(projectionLedger, 0);
-  
+
   // Find which months contain future/scenario entries
   const futureMonths = new Set<string>();
   projectionLedger.forEach(e => {

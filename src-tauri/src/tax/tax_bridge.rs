@@ -315,7 +315,7 @@ pub fn generate_tax_pro_pack(
     pack.push_str("\n3. High Risk Adjustments & Tax Benefits\n");
     // [Antigravity] identifies high-risk entries or major tax benefits automatically
     for entry in ledger.iter().filter(|e| e.tax_code.is_some() || e.description.contains("청년매칭")) {
-        let tag = if entry.description.contains("청년매칭") { "TAX_BENEFIT_YOUTH" } else { entry.tax_code.as_ref().unwrap() };
+        let tag = if entry.description.contains("청년매칭") { "TAX_BENEFIT_YOUTH" } else { entry.tax_code.as_deref().unwrap_or("NORMAL") };
         pack.push_str(&format!("- [{}] {}: {} / Amount {} / Confidence: High (98%)\n", 
             tag, entry.date, entry.description, entry.amount));
     }

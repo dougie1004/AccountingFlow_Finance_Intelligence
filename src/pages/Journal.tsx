@@ -145,6 +145,7 @@ const Journal: React.FC = () => {
                             setStagingTransactions([]);
                         }}
                         onCancel={() => setStagingTransactions([])}
+                        onUpdate={setStagingTransactions}
                     />
                 )}
             </div>

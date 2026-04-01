@@ -82,17 +82,29 @@ export const runEngineStressTest = (
     const scenarioIsolationTest = 'PASS'; 
 
     // Cash Policy Check (Structural)
-    const cashPolicyViolation = financials.cash < 0;
-    if (cashPolicyViolation) {
-        issues.push(`CASH POLICY FAIL: Structural negative cash detected (₩${financials.cash.toLocaleString()})`);
+    if (financials.cash === null || financials.cash === undefined) {
+        issues.push("CRITICAL DATA CORRUPTION: Cash Balance is null or undefined at engine exit!");
+    } else {
+        const cashPolicyViolation = financials.cash < 0;
+        if (cashPolicyViolation) {
+            issues.push(`CASH POLICY FAIL: Structural negative cash detected (₩${financials.cash.toLocaleString()})`);
+        }
     }
+
+    const cashPolicyViolation = financials.cash < 0;
 
     const testResults = [periodLeakTest, tbBalanceTest, bsEquationTest, auditTrailTest, scenarioIsolationTest];
     const passCount = testResults.filter(r => r === 'PASS').length;
-    const score = (passCount / 5) * 100;
+    
+    // [STRICT] Critical Weighting: Imbalances or negative cash destroy engine trust
+    const isCriticalFail = tbBalanceTest === 'FAIL' || bsEquationTest === 'FAIL' || cashPolicyViolation;
+    
+    const baseScore = (passCount / 5) * 100;
+    const finalScore = isCriticalFail ? Math.min(baseScore, 45) : (cashPolicyViolation ? baseScore - 20 : baseScore);
+    const score = Math.max(0, Math.min(100, finalScore));
 
     return {
-        status: passCount === 5 && !cashPolicyViolation ? 'PASS' : 'FAIL',
+        status: (passCount === 5 && !cashPolicyViolation) ? 'PASS' : 'FAIL',
         score,
         issues,
         details: {

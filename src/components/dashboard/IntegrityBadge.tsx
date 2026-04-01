@@ -83,7 +83,7 @@ export const IntegrityBadge: React.FC<IntegrityBadgeProps> = ({ ledger, accounti
             <div className="flex gap-4 items-center">
                 <div className="hidden lg:flex flex-col items-end justify-center px-4 border-r border-white/5 pr-6">
                     <span className="text-[9px] font-black text-slate-500 uppercase">Integrity Score</span>
-                    <span className={`text-xl font-black italic ${report.score >= 90 ? 'text-white' : report.score >= 70 ? 'text-amber-400' : 'text-rose-500'}`}>
+                    <span className={`text-xl font-black italic ${report.status === 'FAIL' ? 'text-rose-500' : report.score >= 90 ? 'text-white' : 'text-amber-400'}`}>
                         {report.score}%
                     </span>
                 </div>

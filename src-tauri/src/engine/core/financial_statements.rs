@@ -77,15 +77,18 @@ pub fn calculate_financial_overview(ledger: &[JournalEntry]) -> FinancialOvervie
 
     let mut top_expense_categories: Vec<ExpenseCategory> = expense_map
         .into_iter()
-        .map(|(category, amount)| ExpenseCategory {
-            category: category.clone(),
-            amount,
-            percentage: (amount / total_expenses) * 100.0,
-            trend: "Stable".to_string(),
+        .map(|(category, amount)| {
+            let percentage = if total_expenses > 0.0 { (amount / total_expenses) * 100.0 } else { 0.0 };
+            ExpenseCategory {
+                category: category.clone(),
+                amount,
+                percentage,
+                trend: "Stable".to_string(),
+            }
         })
         .collect();
 
-    top_expense_categories.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap());
+    top_expense_categories.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
     top_expense_categories.truncate(5);
 
     FinancialOverview {
