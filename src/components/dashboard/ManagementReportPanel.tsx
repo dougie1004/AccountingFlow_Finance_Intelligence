@@ -97,7 +97,7 @@ export const ManagementReportPanel: React.FC<ManagementReportPanelProps> = ({ le
                     </div>
                     <button
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-xl text-xs font-black transition-all border border-indigo-500/20"
-                        onClick={() => alert('상세 PDF 리포트가 생성되었습니다.')}
+                        onClick={() => window.print()}
                     >
                         <Download size={14} />
                         PDF 리포트 다운로드

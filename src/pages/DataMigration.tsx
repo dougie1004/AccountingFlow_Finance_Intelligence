@@ -11,12 +11,14 @@ import {
     Lock,
     Users,
     FileText,
-    Check
+    Check,
+    Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { useAccounting } from '../hooks/useAccounting';
 import { JournalEntry, InferenceResult } from '../types';
+import { exportToExcel } from '../utils/exportUtils';
 
 interface DataMigrationProps {
     setTab: (tab: string) => void;
@@ -451,6 +453,25 @@ export const DataMigration: React.FC<DataMigrationProps> = ({ setTab }) => {
                                             <p className="text-[13px] text-slate-300 leading-relaxed font-bold italic">
                                                 "{migrationResult.totalRecords}건의 전표 데이터를 성공적으로 구조화했습니다. {migrationResult.erpType} 패턴이 감지되어 표준 계정과목으로 최적화 매핑을 완료했습니다."
                                             </p>
+                                        </div>
+
+                                        <div className="flex gap-3 mb-4">
+                                            <button 
+                                                onClick={() => {
+                                                    const formatted = migrationResult.data.map((tx: any) => ({
+                                                        'Date': tx.date,
+                                                        'Description': tx.description,
+                                                        'Vendor': tx.vendor,
+                                                        'Amount': tx.amount,
+                                                        'Mapped Account': tx.accountName,
+                                                        'Confidence': tx.confidence
+                                                    }));
+                                                    exportToExcel(formatted, `Migration_Preview_${new Date().getTime()}`);
+                                                }}
+                                                className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <Download size={14} /> Preview Excel
+                                            </button>
                                         </div>
 
                                         <div className="mt-auto">

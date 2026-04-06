@@ -1,137 +1,94 @@
-// src/core/metrics/metricRegistry.ts
-
-export type KPIType = 'runway' | 'burn' | 'cash';
-
-export interface RunwayInput {
-  currentCash: number;          // latest actual cash ONLY
-  futureCashDeltas: number[];   // projectionLedger 기반 ONLY
-}
+import { JournalEntry, FinancialSummary, AccountDefinition } from '../../types';
 
 /**
- * [V14 SSOT] Unified Burn Calculation
- * Ensures deterministic distinction between Inflow/Outflow.
+ * [V14 SSOT] Core Indicator Window
  */
-export function calculateBurn(entries: any[]) {
-    if (!entries || entries.length === 0) {
-      return { inflow: 0, outflow: 0, netBurn: 0, grossBurn: 0 };
-    }
-  
-    let inflow = 0;
-    let outflow = 0;
-  
-    for (const e of entries) {
-      const amount = Number(e.amount) || 0;
-      const type = (e.type || "").toUpperCase();
-  
-      if (type === "INFLOW" || (e.scope === 'future' && amount > 0)) {
-        inflow += Math.abs(amount);
-      } else if (type === "OUTFLOW" || (e.scope === 'future' && amount < 0)) {
-        outflow += Math.abs(amount);
-      }
-    }
-  
-    const grossBurn = outflow;
-    const netBurn = Math.max(outflow - inflow, 0);
-  
+export function calculateBurn(ledger: JournalEntry[]) {
+    let revenue = 0;
+    let expenses = 0;
+    
+    ledger.forEach(e => {
+        const type = e.type || e.accountType;
+        if (type === 'Revenue' || (e.accountType === 'AR' && e.amount > 0)) revenue += e.amount;
+        if (type === 'Expense' || type === 'Payroll' || (e.accountType === 'AP' && e.amount > 0)) expenses += e.amount;
+    });
+
     return {
-      inflow,
-      outflow,
-      netBurn,
-      grossBurn
+        revenue,
+        expenses,
+        netBurn: Math.max(expenses - revenue, 0),
+        grossBurn: expenses
     };
 }
 
 /**
  * [V14 SSOT] Unified Runway Calculation
- * Formula: Runway = Net Liquidity / Net Burn
  */
-export function calculateRunway({
-    netLiquidity,
-    netBurn,
-}: {
-    netLiquidity: number;
-    netBurn: number;
-}): number {
-    if (netBurn <= 0) return Infinity; // UI에서는 "지속 가능"으로 표시됨
-    const runway = netLiquidity / netBurn;
-    return runway > 0 ? runway : 0;
+export function calculateRunway(params: { netLiquidity: number; netBurn: number }) {
+    const { netLiquidity, netBurn } = params;
+    if (netBurn <= 0) return Infinity;
+    return netLiquidity / netBurn;
+}
+
+export function calculateOperatingBurn(ledger: JournalEntry[]) {
+    const expenses = ledger.filter(e => e.type === 'Expense' || e.type === 'Payroll' || e.accountType === 'AP');
+    return expenses.reduce((sum, e) => sum + e.amount, 0);
 }
 
 /**
- * [Scenario Model] Sequential Cash-Out (Simulation Outcome)
- * This is used for "Simulation Outcome" / "Projected Depletion Point"
+ * [V14] Robust Operating Burn (Excluding non-operational flows)
  */
-export function calculateSequentialRunway({
-  currentCash,
-  futureCashDeltas
-}: RunwayInput): number {
-  if (currentCash <= 0 && (!futureCashDeltas || futureCashDeltas.every(d => d <= 0))) return 0;
-  
-  let runningCash = currentCash;
-  let months = 0;
-  
-  for (const delta of futureCashDeltas) {
-      runningCash += delta;
-      if (delta >= 0) break; // Sustainable/Income -> Simulation break for runway
-      if (runningCash <= 0) break;
-      months++;
-      if (months >= 36) break;
-  }
-  
-  if (runningCash > 0 && months >= futureCashDeltas.length) {
-      const isProfitableOverall = futureCashDeltas.reduce((a, b) => a + b, 0) >= 0;
-      return isProfitableOverall ? Infinity : 36.1;
-  }
-  return months;
+export function calculateRobustOperatingBurn(ledger: JournalEntry[]) {
+    const opExpenses = ledger.filter(e => 
+        (e.type === 'Expense' || e.type === 'Payroll') && 
+        !e.debitAccount?.includes('투자') && 
+        !e.debitAccount?.includes('자산')
+    );
+    return opExpenses.reduce((sum, e) => sum + e.amount, 0);
 }
 
-// Support for older calls while we transition
-export function calculateCashRunway(netLiquidity: number, cashBurn: number): number {
-    return calculateRunway({ netLiquidity, netBurn: cashBurn });
-}
+// SSOT: Sequential Cash Depletion Model
+export function calculateSequentialRunway(params: { 
+    currentCash: number; 
+    futureCashDeltas: number[]; 
+}) {
+    let cash = params.currentCash;
+    let months = 0;
 
-export function calculateCashBurn(futureCashDeltas: number[]): number {
-    if (!futureCashDeltas || futureCashDeltas.length === 0) return 0;
-    let net = 0;
-    futureCashDeltas.forEach(d => {
-        if (d < 0) net += Math.abs(d);
-        else net -= d;
-    });
-    return Math.max(net / futureCashDeltas.length, 0);
-}
-
-export function calculateOperatingBurn(totalExpenses: number, months: number): number {
-    if (months <= 0) return 0;
-    return Math.abs(totalExpenses) / months;
-}
-
-/**
- * [V2.8.2] Cash Burn Breakdown Utility
- * Calculates inflow, outflow, and net cash burn from monthly interval data.
- */
-export function calculateCashBurnBreakdown(historicalMonthsData: any[]) {
-    if (!historicalMonthsData || historicalMonthsData.length === 0) {
-        return { inflow: 0, outflow: 0, netBurn: 0 };
+    for (const delta of params.futureCashDeltas) {
+        cash += delta;
+        if (cash <= 0) break;
+        months++;
+        if (months >= 60) break; 
     }
+    return months;
+}
 
-    const totalInflow = historicalMonthsData.reduce((sum, m) => sum + (m.cashIn || 0), 0);
-    const totalOutflow = historicalMonthsData.reduce((sum, m) => sum + (m.cashOut || 0), 0);
-    const avgInflow = totalInflow / historicalMonthsData.length;
-    const avgOutflow = totalOutflow / historicalMonthsData.length;
+export function calculateCashRunway(currentCash: number, monthlyBurn: number) {
+    if (monthlyBurn <= 0) return 60; 
+    return Math.min(currentCash / monthlyBurn, 60);
+}
 
-    return {
-        inflow: avgInflow,
-        outflow: avgOutflow,
-        netBurn: Math.max(avgOutflow - avgInflow, 0)
-    };
+export function calculateCashBurn(deltas: number[]) {
+    if (!deltas || deltas.length === 0) return 0;
+    const netOut = deltas.filter(d => d < 0).reduce((sum, d) => sum + Math.abs(d), 0);
+    return netOut / deltas.length;
 }
 
 /**
- * [V2.8.2] Robust Operating Burn Calculation
- * Averages out a list of periodic expenses to provide a stable burn figure.
+ * [V14] Cash Burn Breakdown by Category
  */
-export function calculateRobustOperatingBurn(expenseHistory: number[]): number {
-    if (!expenseHistory || expenseHistory.length === 0) return 0;
-    const total = expenseHistory.reduce((sum, val) => sum + Math.abs(val), 0);
-    return total / expenseHistory.length;
+export function calculateCashBurnBreakdown(ledger: JournalEntry[]) {
+    const expenses = ledger.filter(e => e.type === 'Expense' || e.type === 'Payroll' || e.accountType === 'AP');
+    const categories: Record<string, number> = {};
+    
+    expenses.forEach(e => {
+        const cat = e.creditAccount || 'Uncategorized';
+        categories[cat] = (categories[cat] || 0) + e.amount;
+    });
+
+    return Object.entries(categories)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, value]) => ({ name, value }));
 }

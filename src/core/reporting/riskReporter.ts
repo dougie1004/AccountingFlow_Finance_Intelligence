@@ -83,7 +83,7 @@ export const generateRiskReport = (ledger: JournalEntry[], currentDate: string):
 
     const burnResult = calculateBurn(recentLedger);
     const monthsInWindow = 6; // Fixed 6 month window for standard burn
-    const monthlyBurn = burnResult.netBurn / (monthsInWindow || 1);
+    const monthlyBurn = (burnResult.expenses - burnResult.revenue) / (monthsInWindow || 1);
     
     // 실질 영업채무 (Net Trade Payables - Excl. VAT)
     const totalPayablesForCashFlow = riskData.ap.netReal;

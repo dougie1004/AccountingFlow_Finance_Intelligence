@@ -16,10 +16,12 @@ import {
     TrendingDown,
     AlertTriangle,
     Database,
-    Shield
+    Shield,
+    FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
+import { exportToExcel, formatLedgerForExport } from '../utils/exportUtils';
 import { MetricRegistry } from '../core/reporting/metricRegistry';
 import { projectScenarioFrontend } from '../core/simulation/strategicSimulator';
 import { 
@@ -288,8 +290,17 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                         onChange={handlePeriodChange} 
                     />
                     <div className="w-[1px] h-8 bg-white/5 mx-2" />
-                    <button className="flex items-center gap-2 h-12 px-6 bg-[#1A1F2B] border border-white/5 rounded-2xl text-[10px] font-black text-slate-300 hover:text-white transition-all uppercase tracking-widest">
+                    <button 
+                        onClick={() => window.print()}
+                        className="flex items-center gap-2 h-12 px-6 bg-[#1A1F2B] border border-white/5 rounded-2xl text-[10px] font-black text-slate-300 hover:text-white transition-all uppercase tracking-widest"
+                    >
                         <Download size={14} /> PDF
+                    </button>
+                    <button 
+                        onClick={() => exportToExcel(formatLedgerForExport(globalLedger), `AccountingFlow_Ledger_${selectedPeriod}`)}
+                        className="flex items-center gap-2 h-12 px-6 bg-emerald-600/10 hover:bg-emerald-600 border border-emerald-500/20 rounded-2xl text-[10px] font-black text-emerald-400 hover:text-white transition-all shadow-xl shadow-emerald-600/20 uppercase tracking-widest"
+                    >
+                        <FileSpreadsheet size={14} /> EXCEL
                     </button>
                     <button className="flex items-center gap-2 h-12 px-6 bg-indigo-600 hover:bg-indigo-500 rounded-2xl text-[10px] font-black text-white transition-all shadow-xl shadow-indigo-600/20 uppercase tracking-widest">
                         <Share2 size={14} /> SHARE

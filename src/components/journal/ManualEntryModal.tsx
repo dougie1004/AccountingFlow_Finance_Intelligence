@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { X, Check, Calculator, Calendar, User, FileText, ArrowRightLeft } from 'lucide-react';
 import { JournalEntry, EntryType } from '../../types';
 import { ALL_ACCOUNTS } from '../../constants/accounts';
+import { useBillingStatus } from '@/hooks/useBillingStatus';
+import { PaywallModal } from '../PaywallModal';
+import { supabase } from '@/lib/supabaseClient';
 
 interface ManualEntryModalProps {
     isOpen: boolean;
@@ -23,11 +26,19 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ isOpen, onCl
     const [debitAmount, setDebitAmount] = useState<number>(0);
     const [creditAmount, setCreditAmount] = useState<number>(0);
     const [validationError, setValidationError] = useState<string | null>(null);
+    const { isExceeded, plan } = useBillingStatus();
+    const [showPaywall, setShowPaywall] = useState(false);
 
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        // [SaaS Paywall] 차단 로직 적용
+        if (isExceeded) {
+            setShowPaywall(true);
+            return;
+        }
 
         // VALIDATION: Debit must equal Credit
         if (debitAmount !== creditAmount) {
@@ -49,6 +60,14 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ isOpen, onCl
             version: 1,
         };
         onSave(newEntry);
+
+        // 💸 [Monetization] 사용량 차감 (전표 생성 1건)
+        (async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await supabase.rpc('increment_usage', { target_user_id: user.id });
+            }
+        })();
 
         // Reset form and close
         setFormData({
@@ -264,6 +283,13 @@ export const ManualEntryModal: React.FC<ManualEntryModalProps> = ({ isOpen, onCl
                     </div>
                 </form>
             </div>
+
+            {showPaywall && (
+                <PaywallModal 
+                    onClose={() => setShowPaywall(false)} 
+                    currentPlan={plan as any || 'basic'} 
+                />
+            )}
         </div>
     );
 };

@@ -5,6 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { ParsedTransaction } from '../../types';
 import * as XLSX from 'xlsx';
 import { DataMapper } from './DataMapper';
+import { useBillingStatus } from '@/hooks/useBillingStatus';
+import { PaywallModal } from '../PaywallModal';
+import { supabase } from '@/lib/supabaseClient';
 
 interface FileUploaderProps {
     onTransactionsLoaded: (transactions: ParsedTransaction[]) => void;
@@ -19,9 +22,17 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
     const [isMappingProgress, setIsMappingProgress] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const { config } = useAccounting();
+    const { isExceeded, plan } = useBillingStatus();
+    const [showPaywall, setShowPaywall] = useState(false);
 
     const processFiles = async (files: File[]) => {
         if (files.length === 0) return;
+
+        // [SaaS Paywall] 차단 로직 적용
+        if (isExceeded) {
+            setShowPaywall(true);
+            return;
+        }
 
         setIsUploading(true);
         setError(null);
@@ -107,6 +118,12 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                     throw new Error('데이터 분석에 실패했습니다. 파일 형식을 확인하거나 데이터가 포함되어 있는지 확인해 주세요.');
                 }
             } else if (allParsed.length > 0) {
+                // 💸 [Monetization] 사용량 차감
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    await supabase.rpc('increment_usage', { target_user_id: user.id });
+                }
+
                 onTransactionsLoaded(allParsed);
             }
 
@@ -236,6 +253,13 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                     </div>
                 )}
             </div>
+
+            {showPaywall && (
+                <PaywallModal 
+                    onClose={() => setShowPaywall(false)} 
+                    currentPlan={plan as any || 'basic'} 
+                />
+            )}
         </div>
     );
 };

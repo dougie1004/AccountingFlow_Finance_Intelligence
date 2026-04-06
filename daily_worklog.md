@@ -46,3 +46,41 @@
 
 ---
 **Work Session Concluded** – The system is now stable, crash‑free, and numerically synchronized. Ready for full legacy decoupling.
+
+---
+
+# 📅 2026-04-06: Strategic Compass SSOT Normalization & Engine Contract Enforcement
+
+### 🎯 Objective: "KPI Alignment & Engine-UI Decoupling"
+Restored the Strategic Compass dashboard to its stable April 1st high-fidelity state while resolving the "600M Burn" discrepancy via a strict engine-side SSOT contract.
+
+### ✅ Key Deliverables & Achievements
+
+#### 1. Premium UI System Restoration (`StrategicCompass.tsx`)
+- **Baseline Recovery**: Reverted the dashboard to the **April 1st baseline (`9dc44aa`)**, recovering all glassmorphism effects, Framer Motion animations, and the original 4-card KPI layout.
+- **Crash Prevention**: Fixed fatal `TypeError` (Cannot read property 'value') by restoring the `liquidCash` object to the engine output state.
+
+#### 2. Engine Contract & Data Integrity (`strategicCompassEngine.ts`)
+- **Forced Engine Contract**: Expanded the `stats` object to explicitly include `burnBreakdown`, `runway`, and `inputs` fields, eliminating UI-side calculation drift.
+- **Metric Normalization**: Implemented monthly normalization (averaging totals by actual ledger months) within the engine layer, resolving the cumulative burn overestimation bug.
+- **Unified Logic**: Synchronized `netBurn`, `grossBurn`, and `runway` to pull from a single, validated engine output.
+
+#### 3. SSOT Enforcement (Logic Subtraction)
+- **Zero-UI-Calculation**: Stripped all `/` (division) and subtraction operators from the dashboard's rendering layer.
+- **Inputs Restoration**: Maped all `ExplainableKPI` components directly to `stats.inputs` to provide numeric evidence for all metrics.
+- **Dependency Removal**: Eliminated direct references to the raw `financials` object in favor of the validated `stats` stream.
+
+#### 4. Security & Security Hardening
+- **Secret-Free Commit**: Performed a full security scan (`findstr`) to ensure no sensitive tokens/keys were committed to Git.
+- **Production Baseline**: Successfully committed the stabilized engine and UI configuration to the `master` branch.
+
+### 🛡️ Core Principles Maintained
+- **Stability First**: Resolved all runtime crashes and achieved 100% numerical synchronization.
+- **Logic Decoupling**: Separated the calculation interpreter (Engine) from the visual reporter (UI) to prevent logic sprawl.
+
+### 🚀 Next Steps
+- Finalize the automated "Cash Bridge" explanation for P&L vs. Cash discrepancies.
+- Implement the "Dunning Email" automation mock for the next presentation phase.
+
+---
+**Work Session Concluded** – Strategic Compass is now numerically accurate, numerically synchronized, and secured with a clean local commit. Ready for production use.

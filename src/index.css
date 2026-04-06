@@ -116,3 +116,62 @@ body {
   contain: layout style size;
   /* Optimization */
 }
+
+/* PROFESSIONAL REPORT PRINT STYLES */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Hide non-report UI elements */
+  main {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+  
+  nav, .Sidebar, aside, .SidebarContent, .PremiumDatePicker, button, header > div > .flex, .AIAssistantWidget, .TrialBanner {
+    display: none !important;
+  }
+
+  /* Keep the main content */
+  .Dashboard, .Reports, .FinancialStatements, .LedgerView {
+    padding: 20px !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Force background colors and colors in PDF */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .bg-\[\#151D2E\], .bg-\[\#0B1221\], .bg-\[\#121620\] {
+    background-color: #f8fafc !important; /* Light gray for cards instead of dark */
+    border: 1px solid #e2e8f0 !important;
+    color: black !important;
+  }
+
+  h1, h2, h3, h4, .text-white {
+    color: #1e293b !important;
+  }
+
+  .text-indigo-400, .text-emerald-400, .text-rose-400 {
+    font-weight: bold !important;
+  }
+
+  canvas, svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Page breaks */
+  .grid {
+    display: block !important;
+  }
+  .grid > div {
+    margin-bottom: 2rem !important;
+    page-break-inside: avoid !important;
+  }
+}

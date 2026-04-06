@@ -3,6 +3,9 @@ import { Bot, X, Send, Sparkles, Wand2, MessageSquare, Zap, Target, ShieldCheck,
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { AccountingContext } from '../../context/AccountingContext';
+import { useBillingStatus } from '@/hooks/useBillingStatus';
+import { PaywallModal } from '../PaywallModal';
+import { supabase } from '@/lib/supabaseClient';
 
 // Tauri invoke wrapper
 const safeInvoke = async (cmd: string, args?: any) => {
@@ -75,7 +78,8 @@ export const AIAssistantWidget: React.FC = () => {
     const [isMaximized, setIsMaximized] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const { config, ledger, financials, companyKnowledge, selectedDate } = useContext(AccountingContext)!;
-
+    const { isExceeded, plan } = useBillingStatus();
+    const [showPaywall, setShowPaywall] = useState(false);
 
     const clearHistory = () => {
         setMessages([
@@ -122,6 +126,12 @@ If the user asks about periodic performance, prioritize the 'Financial Summary' 
         const text = textOverride || input;
         if (!text.trim()) return;
 
+        // [V6] SaaS Paywall Enforcement: Check usage before sending
+        if (isExceeded) {
+            setShowPaywall(true);
+            return;
+        }
+
         setMessages(prev => [...prev, { role: "user", content: text }]);
         setInput("");
         setIsTyping(true);
@@ -137,6 +147,12 @@ If the user asks about periodic performance, prioritize the 'Financial Summary' 
 
             if (!response || typeof response !== "string") {
                 throw new Error("Invalid response from analysis engine.");
+            }
+
+            // 💸 [Monetization] Count consumption upon successful response
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await supabase.rpc('increment_usage', { target_user_id: user.id });
             }
 
             setMessages(prev => [...prev, { role: "bot", content: response }]);
@@ -288,6 +304,13 @@ If the user asks about periodic performance, prioritize the 'Financial Summary' 
                     <div className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 rounded-full border-2 border-[#0B1221] animate-bounce" />
                 )}
             </motion.button>
+            {showPaywall && (
+                <PaywallModal 
+                    onClose={() => setShowPaywall(false)} 
+                    currentPlan={plan as any || 'basic'} 
+                />
+            )}
+
             <style dangerouslySetInnerHTML={{ __html: `
                 .no-scrollbar::-webkit-scrollbar { display: none; }
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

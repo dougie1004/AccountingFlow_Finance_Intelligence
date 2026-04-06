@@ -31,6 +31,9 @@ import { AccountingContext } from '../../context/AccountingContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip } from '../common/Tooltip';
+import { signOut } from '@/services/authService';
+import { mockUpgrade } from '@/services/paymentService';
+import { useAccessStatus } from '@/hooks/useAccessStatus'; // [추가]
 
 interface SidebarProps {
     activeTab: string;
@@ -92,11 +95,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
         }
     ];
 
-    const SidebarContent = () => {
-        const { resetData } = useContext(AccountingContext)!;
-        const { theme, setTheme } = useTheme();
+const SidebarContent = () => {
+    const { resetData, setIsPlanSelectorOpen } = useContext(AccountingContext)!;
+    const { theme, setTheme } = useTheme();
+    const access = useAccessStatus();
 
-        return (
+    const handleSubscriptionManage = () => {
+        setIsPlanSelectorOpen(true);
+    };
+
+    return (
             <div className="flex flex-col h-full bg-[#070C18] text-slate-400 border-r border-[#151D2E] shadow-2xl overflow-hidden">
                 {/* Header */}
                 <div className="h-[90px] flex flex-col justify-center px-6 border-b border-white/5 shrink-0">
@@ -143,10 +151,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
 
                 {/* Bottom Section: System & Onboarding */}
                 <div className="p-5 border-t border-white/5 bg-[#0A101E] shrink-0">
-                    <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/20 rounded-2xl p-4 mb-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Professional Plan</span>
-                            <div className="bg-indigo-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
+                    <div className="bg-slate-900/50 backdrop-blur-md rounded-2xl p-6 border border-white/5 mb-6">
+                        <div className="flex items-center justify-between mb-4">
+                            {/* 🚀 [Dynamic Plan Name] 실시간 구독 등급 투영 */}
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                                {access.plan?.toUpperCase()} PLAN
+                            </span>
+                            <div className="flex items-center gap-1 bg-indigo-500/10 px-2 py-0.5 rounded-full">
                                 <Zap size={8} className="text-indigo-400 fill-indigo-400" />
                                 <span className="text-[8px] font-black text-indigo-400">AI Plus</span>
                             </div>
@@ -154,7 +165,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                         <div className="w-full bg-white/5 h-1.5 rounded-full mb-3 overflow-hidden">
                             <div className="bg-indigo-500 h-full w-[84%]" />
                         </div>
-                        <button className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
+                        <button 
+                            onClick={handleSubscriptionManage}
+                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                        >
                             Manage Subscription
                         </button>
                     </div>
@@ -170,6 +184,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                             <Database size={14} className={activeTab === 'migration' ? 'text-indigo-400' : ''} />
                             <span className="text-xs font-bold">데이터 연동 및 이관</span>
                         </button>
+                        {/* 🛡️ [Security Gate] 관리자(isAdmin)에게만 노출되는 전용 메뉴 */}
+                        {access.isAdmin && (
+                            <button 
+                                onClick={() => {
+                                    setTab('admin');
+                                    if (isMobile) setIsOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 transition-all rounded-lg group ${activeTab === 'admin' ? 'text-indigo-400 bg-white/5' : 'text-slate-500 hover:text-slate-300'}`}
+                            >
+                                <ShieldCheck size={14} className={activeTab === 'admin' ? 'text-indigo-400' : ''} />
+                                <span className="text-xs font-bold text-indigo-400/80">관리자 승인 센터</span>
+                            </button>
+                        )}
                         <button 
                             onClick={() => {
                                 setTab('settings');
@@ -181,11 +208,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                             <span className="text-xs font-bold">시스템 설정</span>
                         </button>
                         <button 
-                            onClick={resetData}
+                            onClick={async () => {
+                                await signOut();
+                                if (resetData) resetData();
+                                // App.tsx의 onAuthStateChange가 감지하여 자동으로 AuthPage로 보냅니다.
+                            }}
                             className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-slate-400 hover:text-white transition-all rounded-lg group"
                         >
                             <LogOut size={14} />
-                            <span className="text-xs font-bold font-black">로그아웃</span>
+                            <span className="text-xs font-bold font-black tracking-tight underline-offset-4 decoration-indigo-500">로그아웃</span>
                         </button>
                     </div>
                 </div>

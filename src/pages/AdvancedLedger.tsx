@@ -448,7 +448,10 @@ export const AdvancedLedger: React.FC = () => {
                                 </div>
 
                                 <div className="flex justify-center pt-6">
-                                    <button className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all flex items-center gap-3 active:scale-95">
+                                    <button 
+                                        onClick={() => window.print()}
+                                        className="px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl shadow-xl shadow-indigo-600/30 transition-all flex items-center gap-3 active:scale-95"
+                                    >
                                         <Download size={20} />
                                         IR Financial Report (PDF) 다운로드
                                     </button>

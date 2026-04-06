@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useAccounting } from '../hooks/useAccounting';
-import { FileText, Search, Calendar, ChevronDown, ArrowUpDown, ChevronUp } from 'lucide-react';
+import { FileText, Search, Calendar, ChevronDown, ArrowUpDown, ChevronUp, Download } from 'lucide-react';
 import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
+import { exportToExcel, formatLedgerForExport } from '../utils/exportUtils';
 
 const LedgerView: React.FC = () => {
     const { accountingLedger, allLinesLedger, partners, selectedDate } = useAccounting();
@@ -149,6 +150,13 @@ const LedgerView: React.FC = () => {
                             <PremiumDatePicker value={endDate} onChange={setEndDate} />
                         </div>
                     </div>
+
+                    <button
+                        onClick={() => exportToExcel(formatLedgerForExport(processedData), `AccountingFlow_Ledger_${viewMode}`)}
+                        className="flex items-center gap-2 h-12 px-6 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-[10px] font-black text-white transition-all shadow-xl shadow-emerald-600/20 uppercase tracking-widest"
+                    >
+                        <Download size={14} /> EXCEL
+                    </button>
                 </div>
             </div>
 
