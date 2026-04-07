@@ -30,8 +30,8 @@ export const calculateFinancialsFromTB = (trialBalance: TrialBalance): Financial
 
         switch (nature) {
             case 'ASSET':
-                // FIXED: Only 101 (Cash) and 103 (Ordinary Deposit) are liquid cash.
-                if (code === '101' || code === '103') cash += bal;
+                // FIXED [SSOT v12]: Include all cash-equivalent accounts ( 현금, 보통예금, 당좌예금, 기타예금 )
+                if (code === '101' || code === '102' || code === '103' || code === '106') cash += bal;
                 else if (code === '108' || code === '120') { ar += bal; openingAR += opBal; }
                 else if (code === '146') { inventoryValue += bal; openingInventory += opBal; }
                 else if (code === '135') vatNet += bal; 

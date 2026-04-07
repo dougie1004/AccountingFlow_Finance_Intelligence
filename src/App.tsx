@@ -30,6 +30,7 @@ import DailyCashReport from './pages/DailyCashReport';
 import { Settlement } from './pages/Settlement';
 import { RiskControl } from './pages/RiskControl';
 import CloseReadiness from './pages/CloseReadiness';
+import { AdminPage } from './pages/AdminPage';
 
 import { AccountingProvider, AccountingContext } from './context/AccountingContext';
 import { ConfigProvider } from './context/ConfigContext';
@@ -82,6 +83,8 @@ const AppContent = () => {
                         {activeTab === 'advanced-ledger' && <AdvancedLedger />}
                         {activeTab === 'approval-desk' && <ApprovalDesk />}
                         
+                        {activeTab === 'admin-console' && <AdminPage />}
+
                         {activeTab === 'migration' && <DataMigration setTab={setTab} />}
                         {activeTab === 'settings' && <Settings />}
                     </div>
@@ -92,7 +95,28 @@ const AppContent = () => {
     );
 };
 
+import { LoginPage } from './pages/LoginPage';
+import { supabase } from './lib/supabaseClient';
+
 function App() {
+    const [session, setSession] = useState<any>(null);
+
+    useEffect(() => {
+        supabase.auth.getSession().then(({ data }) => {
+            setSession(data.session);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
+    if (!session) {
+        return <LoginPage />;
+    }
+
     return (
         <ThemeProvider>
             <ConfigProvider>

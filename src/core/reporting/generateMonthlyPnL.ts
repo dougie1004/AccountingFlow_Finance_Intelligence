@@ -1,6 +1,7 @@
-import { JournalEntry, TrialBalance } from '../../types';
+import { JournalEntry, AccountDefinition } from '../../types';
 import { calculateTrialBalance } from '../engine/trialBalanceEngine';
 import { unrollJournalToLedger } from '../engine/journalEngine';
+import { CHART_OF_ACCOUNTS } from '../coa';
 
 export interface MonthlyPnLRow {
     month: string;
@@ -27,19 +28,15 @@ export interface MonthlyPnLRow {
 
 /**
  * [REPORTING ENGINE] Monthly P&L Aggregator
- * Strictly uses Trial Balance for all amounts.
- * No description-based logic allowed here.
+ * [V12.1 FIX] Robust categorization to prevent "Zero P&L" data pipeline failure.
  */
 export const generateMonthlyPnL = (
     entries: JournalEntry[], 
     years: number[] = [2026, 2027, 2028], 
-    currentDate: string = "2026-12-31" // default placeholder
+    currentDate: string = "2026-12-31",
+    coa: Record<string, AccountDefinition> = CHART_OF_ACCOUNTS
 ): MonthlyPnLRow[] => {
     console.log("🧪 PnL INPUT SIZE:", entries.length);
-
-    const hasFuture = entries.some(e => e.scope === "future" || e.type === "Scenario");
-
-    console.log("🧪 Contains Future Entries:", hasFuture);
 
     const months: string[] = [];
     years.forEach(y => {
@@ -48,7 +45,8 @@ export const generateMonthlyPnL = (
         }
     });
 
-    const ledgerLines = unrollJournalToLedger(entries);
+    // includeUnapproved is true for scenarios and staging data visualization
+    const ledgerLines = unrollJournalToLedger(entries, true);
 
     return months.map(m => {
         const [y, mm] = m.split('-').map(Number);
@@ -56,11 +54,9 @@ export const generateMonthlyPnL = (
         const lastDay = new Date(y, mm, 0).getDate();
         const periodEnd = `${m}-${String(lastDay).padStart(2, '0')}`;
 
-        // [OFF] Integrity Boundary - [UPDATE] Future entries allowed if they exist
-        // If not, returns 0.
-        const tb = calculateTrialBalance(ledgerLines, periodStart, periodEnd, 'all');
+        // Calculate TB using the provided COA (Critical fix for custom accounts)
+        const tb = calculateTrialBalance(ledgerLines, periodStart, periodEnd, 'all', coa);
         
-        // Map TB items to P&L structure
         let payroll = 0;
         let marketing = 0;
         let rent = 0;
@@ -75,36 +71,35 @@ export const generateMonthlyPnL = (
 
         Object.values(tb).forEach(item => {
             const code = item.meta.code;
+            const name = item.meta.name;
             const periodBal = item.movementDebit - item.movementCredit;
             const nature = item.meta.nature;
 
             if (nature === 'REVENUE') {
-                // Net Credit is positive Revenue (-periodBal)
                 const amount = -periodBal;
-                if (code === '403') grantIncome += amount;
+                // [V12.1] Flexible Revenue Categorization
+                if (code === '403' || name.includes('보조금')) grantIncome += amount;
                 else operatingRevenue += amount;
 
             } else if (nature === 'EXPENSE') {
-                // Net Debit is positive Expense (periodBal)
                 const amount = periodBal;
-                if (code === '801') payroll += amount;
-                else if (code === '826') marketing += amount;
-                else if (code === '816') rent += amount;
-                else if (code === '831' || code === '845') depreciation += amount;
-                else if (code === '501') cogs += amount;
+                // [V12.1] Flexible Expense Categorization (Code + Name Fallback)
+                if (code === '801' || name.includes('급여') || name.includes('인건비')) payroll += amount;
+                else if (code === '826' || name.includes('마케팅') || name.includes('광고')) marketing += amount;
+                else if (code === '816' || name.includes('임차')) rent += amount;
+                else if (code === '831' || code === '845' || name.includes('상각')) depreciation += amount;
+                else if (code === '501' || name.includes('원가')) cogs += amount;
                 else misc += amount;
 
             } else if (nature === 'EQUITY') {
-                // Net Credit is positive Equity (-periodBal)
                 const amount = -periodBal;
-                if (code === '351') investment += amount;
+                if (code === '351' || name.includes('투자')) investment += amount;
             }
 
-            // Cash aggregation (keep as-is)
+            // Cash aggregation (Code check + Name check for robustness)
             if (
-                code === '101' || 
-                code === '103' || 
-                (nature === 'ASSET' && (item.meta.name.includes('현금') || item.meta.name.includes('예금')))
+                code === '101' || code === '103' || 
+                name.includes('현금') || name.includes('예금') || name.includes('계좌')
             ) {
                 monthEndCash += (item.closingDebit - item.closingCredit);
                 monthStartCash += (item.openingDebit - item.openingCredit);

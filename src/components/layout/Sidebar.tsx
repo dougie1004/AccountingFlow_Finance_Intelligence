@@ -31,6 +31,8 @@ import { AccountingContext } from '../../context/AccountingContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tooltip } from '../common/Tooltip';
+import { supabase } from '../../lib/supabaseClient';
+import { PaywallModal } from './PaywallModal';
 
 interface SidebarProps {
     activeTab: string;
@@ -95,9 +97,69 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
     const SidebarContent = () => {
         const { resetData } = useContext(AccountingContext)!;
         const { theme, setTheme } = useTheme();
+        const [profile, setProfile] = useState<any>(null);
+        const [showPaywall, setShowPaywall] = useState(false);
+
+        useEffect(() => {
+            let channel: any;
+            const loadProfile = async () => {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user?.id) {
+                    const { data } = await supabase.from('user_profile').select('*').eq('user_id', session.user.id).single();
+                    if (data) setProfile(data);
+
+                    channel = supabase.channel('realtime-profile')
+                        .on('postgres', { event: '*', schema: 'public', table: 'user_profile', filter: `user_id=eq.${session.user.id}` } as any, (payload: any) => {
+                            setProfile((prev: any) => ({ ...prev, ...payload.new }));
+                        }).subscribe();
+                }
+            };
+            loadProfile();
+            
+            return () => {
+                if (channel) supabase.removeChannel(channel);
+            };
+        }, []);
+
+        let displayMenu = [...menuGroups];
+        const isAdmin = profile?.is_admin === true || String(profile?.is_admin).toLowerCase() === 'true';
+        
+        // Derived AI limits based on current plan
+        let aiLimit = 50; 
+        if (profile?.plan === 'standard') aiLimit = 200;
+        else if (profile?.plan === 'pro') aiLimit = -1;
+
+        // Trial Expiry Logic
+        let daysLeft = 999;
+        let isExpired = false;
+        let showWarning = false;
+        
+        if (profile?.access_type === 'trial' && profile?.trial_end) {
+            const endDate = new Date(profile.trial_end);
+            daysLeft = Math.ceil((endDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+            if (daysLeft <= 0) {
+                isExpired = true;
+            } else if (daysLeft <= 3) {
+                showWarning = true;
+            }
+        }
+        
+        if (isAdmin) {
+            displayMenu = [
+                {
+                    title: '🚀 시스템 관리 (SUPER ADMIN)',
+                    items: [
+                        { id: 'admin-console', label: '플랜 승인 센터 (Admin)', description: '사용자 구독 플랜 승인 및 관리', icon: ShieldCheck }
+                    ]
+                },
+                ...displayMenu
+            ];
+        }
 
         return (
-            <div className="flex flex-col h-full bg-[#070C18] text-slate-400 border-r border-[#151D2E] shadow-2xl overflow-hidden">
+            <div className="flex flex-col h-full bg-[#070C18] text-slate-400 border-r border-[#151D2E] shadow-2xl overflow-hidden relative">
+                {isExpired && <PaywallModal onClose={() => setShowPaywall(false)} onSuccess={() => alert('업그레이드 요청이 완료되었습니다.')} forceLock={true} />}
+                {showPaywall && !isExpired && <PaywallModal onClose={() => setShowPaywall(false)} onSuccess={() => setShowPaywall(false)} />}
                 {/* Header */}
                 <div className="h-[90px] flex flex-col justify-center px-6 border-b border-white/5 shrink-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -107,13 +169,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                     <div className="flex items-center gap-3">
                         <div className="bg-indigo-600/20 border border-indigo-500/30 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
                             <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
-                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">DEVELOPER EDITION</span>
+                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">
+                                DEVELOPER EDITION
+                            </span>
                         </div>
                     </div>
                 </div>
 
+                {showWarning && !isExpired && (
+                    <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2">
+                        <div className="flex items-center justify-between">
+                            <span className="text-amber-400 text-xs font-bold">무료 체험 만료 D-{daysLeft}</span>
+                            <button 
+                                onClick={() => setShowPaywall(true)}
+                                className="text-[10px] font-black uppercase bg-amber-500/20 text-amber-400 px-2 py-1 rounded hover:bg-amber-500/30 transition-all"
+                            >
+                                결제 수단 등록
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <nav className="flex-1 px-4 py-6 space-y-8 overflow-y-auto custom-scrollbar">
-                    {menuGroups.map((group) => (
+                    {displayMenu.map((group) => (
                         <div key={group.title} className="space-y-1">
                             <h3 className="px-4 text-[10px] font-black text-slate-600 uppercase tracking-[0.15em] mb-3">{group.title}</h3>
                             <div className="space-y-1">
@@ -145,16 +223,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                 <div className="p-5 border-t border-white/5 bg-[#0A101E] shrink-0">
                     <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/20 rounded-2xl p-4 mb-4">
                         <div className="flex items-center justify-between mb-3">
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Professional Plan</span>
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                                {profile ? (
+                                    <>
+                                        {profile.subscription_status === 'trial' ? 'FREE TRIAL' : `${profile.plan || 'BASIC'} PLAN`}
+                                        {profile.upgrade_status === 'pending' && <span className="text-amber-400 ml-1">(PENDING)</span>}
+                                    </>
+                                ) : 'LOADING...'}
+                            </span>
                             <div className="bg-indigo-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
                                 <Zap size={8} className="text-indigo-400 fill-indigo-400" />
                                 <span className="text-[8px] font-black text-indigo-400">AI Plus</span>
                             </div>
                         </div>
-                        <div className="w-full bg-white/5 h-1.5 rounded-full mb-3 overflow-hidden">
-                            <div className="bg-indigo-500 h-full w-[84%]" />
+                        <div className="w-full bg-white/5 h-1.5 rounded-full mb-1 overflow-hidden">
+                            <div 
+                                className="bg-indigo-500 h-full transition-all duration-500" 
+                                style={{ width: `${aiLimit === -1 ? 100 : Math.min(((profile?.ai_usage_count || 0) / aiLimit) * 100, 100)}%` }} 
+                            />
                         </div>
-                        <button className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
+                        <div className="text-right text-[9px] font-bold text-slate-500 mb-3 uppercase tracking-wider">
+                            AI QUERIES: <span className="text-indigo-400">{profile?.ai_usage_count || 0}</span> / {aiLimit === -1 ? '∞' : aiLimit}
+                        </div>
+                        <button 
+                            onClick={() => {
+                                console.log("🔘 Button primitive clicked");
+                                setShowPaywall(true);
+                            }}
+                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-600/20"
+                        >
                             Manage Subscription
                         </button>
                     </div>
@@ -181,7 +278,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                             <span className="text-xs font-bold">시스템 설정</span>
                         </button>
                         <button 
-                            onClick={resetData}
+                            onClick={async () => {
+                                console.log("🔥 logout start");
+
+                                const { error } = await supabase.auth.signOut();
+
+                                if (error) {
+                                    console.error(error);
+                                    alert("로그아웃 실패");
+                                    return;
+                                }
+
+                                resetData();
+
+                                window.location.reload();
+
+                                console.log("🔥 logout done");
+                            }}
                             className="w-full flex items-center gap-3 px-4 py-2 hover:bg-white/5 text-slate-400 hover:text-white transition-all rounded-lg group"
                         >
                             <LogOut size={14} />

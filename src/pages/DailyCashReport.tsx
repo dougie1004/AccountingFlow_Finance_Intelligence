@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useAccounting } from '../hooks/useAccounting';
 import { AnimatePresence, motion } from 'framer-motion';
+import { CASH_ACCOUNT_IDENTIFIERS, sumCashAccounts } from '../core/ssot/cashTruth';
 
 const DailyCashReport: React.FC = () => {
     const { ledger, selectedDate, setSelectedDate } = useAccounting();
@@ -45,7 +46,7 @@ const DailyCashReport: React.FC = () => {
         setActualBalanceInput(balance.toString());
     }, [selectedDate, ledger.length]); // Also sync if ledger changes (e.g. simulation run)
 
-    const cashAccounts = ['현금', '보통예금', '예금', 'cash', 'bank'];
+    const cashAccounts = CASH_ACCOUNT_IDENTIFIERS;
 
     const metrics = useMemo(() => {
         const targetDate = new Date(selectedDate);
@@ -113,6 +114,10 @@ const DailyCashReport: React.FC = () => {
                             <p className="text-xs text-slate-500 font-bold mt-1 uppercase tracking-widest leading-none">
                                 {selectedDate} 기준 자금 흐름 및 시세 마감
                             </p>
+                            {/* [SSOT Validation] */}
+                            {metrics.todayBalance !== sumCashAccounts(ledger, selectedDate) && (
+                                <div className="text-[10px] text-rose-500 font-black animate-pulse mt-2">🚨 SSOT MISMATCH DETECTED</div>
+                            )}
                         </div>
                     </div>
                 </div>

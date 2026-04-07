@@ -1,145 +1,270 @@
 import { calculateSequentialRunway, calculateCashRunway, calculateBurn } from '../core/metrics/metricRegistry';
+import { 
+    calculateDilution, 
+    requiredFunding, 
+    analyzeEquityControl, 
+    analyzeFundingTiming, 
+    generateEquityInsight 
+} from './equityEngine';
+import { sumCashAccounts } from '../core/ssot/cashTruth';
+import { generateMonthlyPnL } from '../core/reporting/generateMonthlyPnL';
+import { generateCashFlow } from '../core/reporting/generateCashFlow';
+import { generateProjectionLedger, buildMetrics } from '../core/ssotEngine';
+import { INSIGHT_UI_MAP } from './cfoInsight';
 
 export interface StrategicEngineInput {
-    chartData: any[];
-    ssotMetrics: any;
-    projectionLedger: any[];
+    actualLedger: any[];
+    projectionLedger: any[];   // Scenario ledger from simulator
+    baselineEntries: any[];
     selectedDate: string;
     preMoneyValuation: number;
     investmentAmount: number;
-    actualNetProfit: number;
-    liquidCash: any; // Object { value, inputs, ... }
-    actualLedger?: any[]; // Raw ledger access
-    asOfDate?: string;     // Sync with dashboard date
+    liquidCashData: any;      // Pass TrialBalance-derived liquidity base (미지급금 등)
+    coa: Record<string, any>; // Full COA for robust interpretatiton
+    projectionMonths?: number;
 }
 
 /**
- * [PHASE 2 CRITICAL FIX] Strategic Compass Interpreter Engine
- * 엔진은 더 이상 계산하지 않습니다. 주입된 데이터를 해석만 합니다.
+ * [V14.1 ADAPTER] Standardizes diverse ledger formats for legacy generator compatibility.
+ * Ensures fields (amount, accountId, type) and date formats are consistent.
+ */
+function normalizeEntries(ledger: any[]): any[] {
+    return (ledger || []).map(e => {
+        // [CONTRACT] Ensure amount is numeric
+        const amount = Number(e.amount) || 0;
+        
+        // [CONTRACT] Unify Account ID / Name
+        const debitAccount = e.debitAccount || e.debit || "";
+        const creditAccount = e.creditAccount || e.credit || "";
+        const debitAccountId = e.debitAccountId || e.debitAccount;
+        const creditAccountId = e.creditAccountId || e.creditAccount;
+
+        // [CONTRACT] Date standardization (ISO-like string)
+        let date = e.date;
+        if (date instanceof Date) date = date.toISOString().split('T')[0];
+        
+        // [CONTRACT] Status & Scope
+        const status = e.status || "Approved";
+        const scope = (e.scope || "actual").toLowerCase();
+
+        return {
+            ...e,
+            date,
+            amount,
+            debitAccount,
+            debitAccountId,
+            creditAccount,
+            creditAccountId,
+            status,
+            scope
+        };
+    });
+}
+
+/**
+ * [V14 SSOT OPERATION] Strategic Compass Interpreter Engine
+ * UI의 모든 계산 로직을 엔진으로 이산화하여 단일 진실 공급원으로 기능한다.
  */
 export function runStrategicCompassEngine(input: StrategicEngineInput) {
     const { 
-        chartData, ssotMetrics, projectionLedger, selectedDate, 
-        preMoneyValuation, investmentAmount, actualNetProfit, liquidCash,
-        actualLedger = []
+        actualLedger = [], 
+        projectionLedger = [], 
+        baselineEntries = [],
+        selectedDate, 
+        preMoneyValuation, 
+        investmentAmount, 
+        liquidCashData,
+        coa,
+        projectionMonths = 36
     } = input;
 
-    // 🔥 [V13.1] DATA BOUNDARY RESTORATION (ChatGPT Analysis)
-    // 1. Burn(소모액) 및 현재 상태 지표는 오직 '과거 실적(Actual)' 기반으로 앵커링한다.
-    // 전체 병합 데이터를 쓰면 2028년 미래 시점으로 지표가 밀려버리는 현상 방지.
-    const burnResult = calculateBurn(actualLedger);
+    // 1. Anchor — 실질 현금 잔액 (UI의 SSOT와 동일하게 처리)
+    const ACTUAL_CASH_TRUTH = sumCashAccounts(actualLedger, selectedDate);
+    const offset = ACTUAL_CASH_TRUTH - (liquidCashData?.grossCash || 0);
+    
+    // 2. SSOT Metrics & PnL Generation (Adapter Applied)
+    const normalizedActual = normalizeEntries(actualLedger);
+    const normalizedScenario = normalizeEntries(projectionLedger);
+    const normalizedBaseline = normalizeEntries(baselineEntries);
 
-    // 2. 전체 Trajectory 확보를 위한 병합 (차트 렌더링 및 런웨이 누적 계산용)
-    const entries = [...actualLedger, ...(projectionLedger || [])];
+    const mergedScenarioLedger = [...normalizedActual, ...normalizedScenario];
+    const mergedBaselineLedger = [...normalizedActual, ...normalizedBaseline];
+    
+    const startY = new Date(selectedDate).getFullYear();
+    const endY = new Date(new Date(selectedDate).getFullYear(), new Date(selectedDate).getMonth() + projectionMonths).getFullYear();
+    const analysisYears = [];
+    for (let y = startY - 2; y <= endY; y++) analysisYears.push(y);
 
-    // 1. 입력 무결성 검증 로깅
-    console.log("🔥 ENGINE INPUT CHECK (Boundary Fixed)", {
-      actualCount: actualLedger.length,
-      currentRealBurn: burnResult.netBurn,
-      asOfDate: selectedDate
+    const actualPnL = generateMonthlyPnL(normalizedActual, analysisYears, selectedDate, coa);
+    const scenarioPnL = generateMonthlyPnL(mergedScenarioLedger, analysisYears, selectedDate, coa);
+    const baselinePnL = generateMonthlyPnL(mergedBaselineLedger, analysisYears, selectedDate, coa);
+    
+    const ssotMetrics = buildMetrics(generateProjectionLedger({ actualLedger: mergedScenarioLedger }));
+    const baselineCashFlow = generateCashFlow(mergedBaselineLedger, 0);
+
+    // 3. Chart Data Construction (UI-side Logic Moved Here)
+    const anchorMonthFormatted = selectedDate.substring(0, 7);
+    const actualPnLMap = new Map(actualPnL.map((p: any) => [p.month, p]));
+    const scenarioPnLMap = new Map(scenarioPnL.map((p: any) => [p.month, p]));
+    const baselinePnLMap = new Map(baselinePnL.map((p: any) => [p.month, p]));
+    const baseCFMap = new Map(baselineCashFlow.map((c: any) => [c.date, c]));
+    
+    const nowIndexInMetrics = ssotMetrics.cashflow.findIndex((cf: any) => cf.date === anchorMonthFormatted);
+
+    const chartData = ssotMetrics.cashflow.map((cf: any, index: number) => {
+        const actual = actualPnLMap.get(cf.date);
+        const scenario = scenarioPnLMap.get(cf.date);
+        const baseline = baselinePnLMap.get(cf.date);
+        const baseCF = baseCFMap.get(cf.date);
+        
+        return {
+            month: cf.date.substring(2).replace('-', '/'),
+            fullMonth: cf.date,
+            BaselineCash: (baseCF?.cash ?? 0) + offset,
+            ScenarioCash: cf.cash + offset,
+            ScenarioProfit: scenario?.operatingProfit ?? 0,
+            ScenarioNetIncome: scenario?.netIncome ?? 0,
+            ActualProfit: index <= nowIndexInMetrics ? (actual?.operatingProfit ?? 0) : 0,
+            BaselineProfit: baseline?.operatingProfit ?? 0,
+            cashDelta: cf.delta || 0,
+            isFuture: index > nowIndexInMetrics,
+            isNow: index === nowIndexInMetrics,
+            index
+        };
     });
 
-    const currentYearMonth = selectedDate.substring(0, 7);
-    const nowIndex = chartData.findIndex((d: any) => d.fullMonth === currentYearMonth || d.isNow);
-    const currentCash = liquidCash?.value || 0;
-
-    const burnBreakdown = {
-        ...burnResult,
-        isBurning: burnResult.netBurn > 0,
-        netCashAvg: -burnResult.netBurn, 
-        window: 6 // 최근 6개월 실적 기반
-    };
-    const cashBurn = burnResult.netBurn;
-
-    // 3. Runway & Inflection Point (Injection 기반)
+    // 4. Burn & Runway Analysis
+    const burnResult = calculateBurn(actualLedger);
+    const currentCash = ACTUAL_CASH_TRUTH - (Number(liquidCashData?.inputs?.['미지급금'] || 0) + Number(liquidCashData?.inputs?.['미지급비용'] || 0));
+    
     const futureCashDeltas = chartData
-        .filter((_, i) => i > nowIndex)
+        .filter((_, i) => i > nowIndexInMetrics)
         .map(d => d.cashDelta || 0);
-    const strategyMonths = chartData.filter((_, i) => i > nowIndex);
 
-    let inflectionPoint = null;
-    for (let i = 0; i < futureCashDeltas.length; i++) {
-        if (futureCashDeltas[i] < 0) {
-            inflectionPoint = { monthsOffset: i + 1, date: strategyMonths[i].fullMonth };
-            break;
-        }
-    }
+    const runwayValue = calculateSequentialRunway({ currentCash, futureCashDeltas });
+    const survivalRunway = calculateCashRunway(currentCash, burnResult.netBurn);
 
-    const runway = {
-        value: calculateSequentialRunway({ currentCash: liquidCash?.value || 0, futureCashDeltas }),
-        inflectionPoint,
-        inputs: {
-            'Gross Cash': currentCash,
-            'Net Liquidity': liquidCash?.value || 0,
-            'Cash Burn (Avg)': Math.round(cashBurn),
-            'Start Period': selectedDate
-        },
-        formula: 'CASH VIEW: Sequential Cash-Out',
-        period: '시뮬레이션 예측',
-        dataSource: 'scenario' as any,
-        monthlyDeltas: ssotMetrics.cashflow.map((cf: any) => ({ date: cf.date, cashDelta: cf.delta }))
-    };
-
-    const liquidityRunway = {
-        value: calculateCashRunway(liquidCash?.value || 0, cashBurn),
-        inputs: { 'Net Liquidity': liquidCash?.value || 0, 'Cash Burn': Math.round(cashBurn) },
-        formula: 'CASH VIEW: Liquidity / Cash Burn',
-        period: '유동성 기준 런웨이',
-        dataSource: 'scenario' as any
-    };
-
-    const metricResults = {
-        liquidCash,
-        runway,
-        projectedRunway: runway,
-        liquidityRunway,
-        cashBurn,
-        burnBreakdown,
-        burnBridge: { pnlBurn: 0, cashOut: Math.round(burnResult.outflow), diff: 0 } 
-    };
-
-    // 4. Trajectory analysis
+    // 5. Inflection / Milestones
     let cashOutMonthIdx = null;
     let breakEvenMonthIdx = null;
     let minCashValue = Infinity;
     for (let i = 0; i < chartData.length; i++) {
         if (chartData[i].isFuture) {
             if (chartData[i].ScenarioCash < minCashValue) minCashValue = chartData[i].ScenarioCash;
-            if (cashOutMonthIdx === null && chartData[i].ScenarioCash < 0) {
-                cashOutMonthIdx = i;
-            }
-            if (breakEvenMonthIdx === null && chartData[i].ScenarioProfit > 0) {
-                breakEvenMonthIdx = i;
-            }
+            if (cashOutMonthIdx === null && chartData[i].ScenarioCash < 0) cashOutMonthIdx = i;
+            if (breakEvenMonthIdx === null && chartData[i].ScenarioProfit > 0) breakEvenMonthIdx = i;
         }
     }
 
-    const stats = {
-        ...metricResults,
-        liquidCash, 
-        cashBalance: liquidCash?.value || 0,
-        runwayMonths: runway.value,
-        strategicRunway: runway.value,
-        survivalRunway: liquidityRunway.value,
-        cashBurn: burnResult.netBurn,
-        netBurn: burnResult.netBurn,
-        grossBurn: burnResult.grossBurn,
-        inflow: burnResult.inflow,
-        outflow: burnResult.outflow,
-        actualNetProfit,
-        liquidityRunwayMonths: liquidityRunway.value,
-        breakEvenMonth: breakEvenMonthIdx,
-        cashOutMonth: cashOutMonthIdx,
-        minCash: minCashValue,
-        insight: (metricResults as any).insight || (input as any).insight
+    // 6. Equity & Dilution Analysis (UI Logic Migrated)
+    const equityControl = analyzeEquityControl(preMoneyValuation || 1000000000, investmentAmount);
+    
+    const avgFutureBurn = Math.abs(futureCashDeltas.reduce((a, b) => a + b, 0) / (futureCashDeltas.length || 1)) || 1;
+    const fundingNeeded = requiredFunding(runwayValue, 18, avgFutureBurn);
+    const dilution = calculateDilution(preMoneyValuation || 500000000, fundingNeeded);
+    const fundingTiming = analyzeFundingTiming({ runwayMonths: runwayValue });
+    
+    const equityInsight = generateEquityInsight({ 
+        runway: runwayValue, 
+        dilution, 
+        control: equityControl.controlState, 
+        timing: fundingTiming 
+    });
+
+    // 7. Advanced CFO Insight (Scenario Aware)
+    // Mapping internal logic to INSIGHT_UI_MAP keys
+    let insightKey = "STABLE";
+    let customMessage = "현재 수준의 운영 안정성이 유지됩니다.";
+
+    if (runwayValue < 6) {
+        insightKey = "CRITICAL";
+        customMessage = "현금 고갈 위험이 매우 높습니다. 즉각적인 조치가 필요합니다.";
+    } else if (cashOutMonthIdx !== null && runwayValue < 12) {
+        insightKey = "DECLINING";
+        customMessage = "수익성이 지속적으로 악화되는 시나리오입니다. 런웨이 확보가 시급합니다.";
+    } else if (breakEvenMonthIdx !== null && (breakEvenMonthIdx - nowIndexInMetrics) < 24) {
+        insightKey = "J_CURVE";
+        customMessage = "시뮬레이션 기간 내 흑자 전환이 예상됩니다. 성장 동력을 집중 투입하십시오.";
+    } else if (equityControl.controlState === 'CONTROL_LOST' || equityControl.controlState === 'MINORITY_RISK') {
+        insightKey = "CRITICAL";
+        customMessage = "경영권 위기 단계입니다. 추가 지분 희석에 각별한 주의가 필요합니다.";
+    } else if (futureCashDeltas.reduce((a, b) => a + b, 0) > 0) {
+        insightKey = "GROWING";
+        customMessage = "안정적인 수익 성장이 기대되는 전략입니다.";
+    }
+
+    const baseInsight = INSIGHT_UI_MAP[insightKey] || INSIGHT_UI_MAP.STABLE;
+    const insight = {
+        ...baseInsight,
+        message: customMessage,
+        // UI expects bg, border from insight object but INSIGHT_UI_MAP has bgColor, borderColor
+        bg: baseInsight.bgColor,
+        border: baseInsight.borderColor
     };
 
+    const stats = {
+        cashBalance: ACTUAL_CASH_TRUTH,
+        liquidCash: { value: currentCash, inputs: liquidCashData?.inputs || {} },
+        runway: runwayValue,
+        strategicRunway: runwayValue,
+        survivalRunway: survivalRunway,
+        liquidityRunway: { 
+            value: survivalRunway, 
+            formula: 'Liquidity / Net Burn', 
+            period: 'Current', 
+            dataSource: 'actual',
+            inputs: { 'Net Liquidity': currentCash, 'Net Burn': burnResult.netBurn }
+        },
+        netBurn: burnResult.netBurn,
+        grossBurn: burnResult.grossBurn,
+        breakEvenMonth: breakEvenMonthIdx,
+        breakEvenOffset: breakEvenMonthIdx !== null ? breakEvenMonthIdx - nowIndexInMetrics : null,
+        cashOutMonth: cashOutMonthIdx,
+        insight,
+        burnBreakdown: { 
+            ...burnResult, 
+            isBurning: burnResult.netBurn > 0, 
+            netCashAvg: -burnResult.netBurn 
+        },
+        equityAnalysis: {
+            fundingNeeded,
+            dilution,
+            control: equityControl.controlState,
+            timing: fundingTiming,
+            insight: equityInsight,
+            fundingIndex: cashOutMonthIdx !== null ? Math.max(cashOutMonthIdx - 6, 0) : -1,
+            failIndex: cashOutMonthIdx
+        }
+    };
+
+    // 🚀 [V14.2 INTEGRITY AUDIT] Final Verification Logs for CPA-level Accuracy
+    const totalActualRevenue = actualPnL.reduce((sum: number, p: any) => sum + p.revenue, 0);
+    const totalActualExpense = actualPnL.reduce((sum: number, p: any) => sum + p.payroll + p.marketing + p.rent + p.depreciation + p.misc + p.cogs, 0);
+    const totalMisc = actualPnL.reduce((sum: number, p: any) => sum + p.misc, 0);
+
+    console.log("💎 [INTEGRITY AUDIT: CASH]", {
+        DashboardTruth: liquidCashData?.grossCash || 0,
+        EngineInitialCash: ACTUAL_CASH_TRUTH,
+        Drift: ACTUAL_CASH_TRUTH - (liquidCashData?.grossCash || 0),
+        Status: ACTUAL_CASH_TRUTH === (liquidCashData?.grossCash || 0) ? "✅ PERFECT" : "⚠️ OFFSET_APPLIED"
+    });
+
+    console.log("💎 [INTEGRITY AUDIT: REVENUE/EXPENSE]", {
+        TotalPnLRevenue: totalActualRevenue,
+        TotalPnLExpense: totalActualExpense,
+        NetIncome: totalActualRevenue - totalActualExpense,
+        MiscRatio: (totalMisc / (totalActualExpense || 1) * 100).toFixed(2) + "%",
+        Status: totalMisc / (totalActualExpense || 1) < 0.1 ? "✅ STABLE" : "⚠️ REVIEW_MISC"
+    });
+
+    console.log("💎 [INTEGRITY AUDIT: MAPPING]", {
+        MappedAccounts: Object.keys(coa || {}).length,
+        UnmappedCheck: totalMisc === 0 ? "✅ ALL_MAPPED" : `ℹ️ ${totalMisc.toLocaleString()} in Misc`
+    });
+
     return {
-        projectionLedger,
-        ssotMetrics,
-        metricResults,
         chartData,
-        equityAnalysis: null, 
-        stats
+        stats,
+        equityControl
     };
 }

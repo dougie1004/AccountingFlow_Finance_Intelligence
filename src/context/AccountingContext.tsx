@@ -1,8 +1,10 @@
 import React, { createContext, useState, useMemo, ReactNode, useEffect, useCallback } from 'react';
 import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction, LedgerLine, TrialBalance, AccountDefinition, MacroAssumptions, AiChatMessage } from '../types';
 import { calculateTrialBalance, calculateFinancialsFromTB, unrollJournalToLedger, generateMultiYearSimulation } from '../core/engine';
+import { sumCashAccounts } from '../core/ssot/cashTruth';
 import { CHART_OF_ACCOUNTS } from '../core/coa';
 import { ALL_ACCOUNTS, MASTER_ACCOUNTS } from '../constants/accounts';
+import { supabase } from '../lib/supabaseClient';
 
 export interface AccountingContextType {
     ledger: JournalEntry[];
@@ -94,6 +96,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     const isDev = !(import.meta as any).env.PROD;
     const isInitialLoad = React.useRef(true);
     const [ledger, setLedger] = useState<JournalEntry[]>(INITIAL_DATA);
+    const [loading, setLoading] = useState(true);
     const [partners, setPartners] = useState<Partner[]>([]);
     const [assets, setAssets] = useState<Asset[]>([]);
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -823,8 +826,12 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
 
     // [STRICT] TB -> FS Pipeline
     const financials = useMemo(() => {
-        return calculateFinancialsFromTB(trialBalance);
-    }, [trialBalance]);
+        const f = calculateFinancialsFromTB(trialBalance);
+        // [SSOT v12] Force Cash Truth from Ledger (Replaces TB-only aggregation)
+        // This ensures Dashboard, Compass, and Cash Report see the EXACT same number.
+        f.cash = sumCashAccounts(ledger, selectedDate);
+        return f;
+    }, [trialBalance, ledger, selectedDate]);
 
     return (
         <AccountingContext.Provider value={{

@@ -154,19 +154,21 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
         const burnBreakdown = calculateCashBurnBreakdown(historicalMonthsData);
         const cashBurn = burnBreakdown.netBurn;
 
-        const runway = calculateCashRunway(liquidCash, cashBurn);
+        const runway = calculateCashRunway(liquidCash, cashBurn) ?? Infinity;
         const isHealthy = isProfitable || runway > 12;
         
+        const formatRunway = (r: number) => r === Infinity ? '안정/무한' : r.toFixed(1);
+
         const observations = isProfitable 
             ? `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 순이익은 효율적인 비용 통제와 매출 성장이 맞물린 결과입니다. 현재의 이익 구조를 유지하면서 신규 성장 동력을 확보하는 전략이 유효합니다.`
-            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 높은 비용 비중(Opex Ratio: ${opexRatio.toFixed(1)}%)을 시사합니다. ${runway < 6 ? `현재 현금 소모액(Cash Burn) 기준 생존 기간이 ${runway.toFixed(1)}개월로 보수적인 관리가 필요합니다.` : '단기 매출 확보와 고정비 효율화가 시급한 시점입니다.'}`;
+            : `이번 기간 기록된 ${financials.netIncome.toLocaleString()}원의 손익 구조는 높은 비용 비중(Opex Ratio: ${opexRatio.toFixed(1)}%)을 시사합니다. ${runway < 6 ? `현재 현금 소모액(Cash Burn) 기준 생존 기간이 ${formatRunway(runway)}개월로 보수적인 관리가 필요합니다.` : '단기 매출 확보와 고정비 효율화가 시급한 시점입니다.'}`;
 
         const highlightedItems = [];
         if (cashRatio > 30) {
             if (isHealthy) {
                 highlightedItems.push(`현금 유동성 비중이 ${cashRatio.toFixed(1)}%로 매우 견고하며 장기 운영을 위한 체력을 확보하고 있습니다.`);
             } else if (runway > 3) {
-                highlightedItems.push(`자산 중 현금 비중(${cashRatio.toFixed(1)}%)은 높으나, 현재의 월간 손실액(Runway ${runway.toFixed(1)}개월)을 고려할 때 유동성 보존을 최우선으로 해야 합니다.`);
+                highlightedItems.push(`자산 중 현금 비중(${cashRatio.toFixed(1)}%)은 높으나, 현재의 월간 손실액(Runway ${formatRunway(runway)}개월)을 고려할 때 유동성 보존을 최우선으로 해야 합니다.`);
             } else {
                 highlightedItems.push(`자산의 ${cashRatio.toFixed(1)}%가 현금이지만, 현재 지출 속도라면 3개월 내 고갈 위험이 있는 위기 상태입니다.`);
             }

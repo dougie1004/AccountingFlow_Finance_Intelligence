@@ -24,6 +24,7 @@ import { ExplainableKPI } from '../components/shared/ExplainableKPI';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccounting } from '../hooks/useAccounting';
+import { sumCashAccounts } from '../core/ssot/cashTruth';
 import { generateMultiYearSimulation } from '../core/simulation/journalGenerator';
 import { SCENARIO_CONFIGS } from '../core/simulation/scenarioConfigs';
 import { resolveARPU, resolveMarketing } from '../core/engine/scenarioResolver';
@@ -80,14 +81,33 @@ export const Dashboard = () => {
 
     const metricResults = useMemo(() => {
         if (!trialBalance) return null;
-        const liquidCash = MetricRegistry.calculateLiquidCash(trialBalance);
+        
+        // [SSOT v12] Use global financials.cash (The Truth)
+        const liquidCashValue = financials.cash; 
+        const liquidCash = { 
+            value: liquidCashValue, 
+            inputs: { '현금 원장 합계': liquidCashValue }, 
+            formula: 'sumCashAccounts(ledger)', 
+            period: '현재 시점', 
+            dataSource: 'actual' as any
+        };
+        
         const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
         
         const ytStart = `${selectedDate.split('-')[0]}-01-01`;
         const cashDelta = MetricRegistry.calculateCashDelta(ledger, ytStart, selectedDate);
 
+        // 🔥 STEP 3: Mandatory Validation Code
+        const ledgerCashSum = sumCashAccounts(ledger, selectedDate);
+        if (liquidCashValue !== ledgerCashSum) {
+            console.error("🚨 CASH MISMATCH: Dashboard Cash (TB-derived) vs Ledger Truth", {
+                dashboard: liquidCashValue,
+                truth: ledgerCashSum
+            });
+        }
+
         return { liquidCash, actualNetProfit, cashDelta };
-    }, [trialBalance, ledger, selectedDate]);
+    }, [trialBalance, ledger, selectedDate, financials.cash]);
 
     const projectedAnalytics = useMemo(() => {
         const cfg = SCENARIO_CONFIGS[selectedScenario];

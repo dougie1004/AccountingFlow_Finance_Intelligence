@@ -28,19 +28,11 @@ import {
     calculateCashBurnBreakdown,
     calculateOperatingBurn
 } from '../core/metrics/metricRegistry';
-import {
-    generateCFOInsight as generateDeterministicCFOInsight,
-    INSIGHT_UI_MAP
-} from '../engines/cfoInsight';
-import { calculateCashVsPLBridge } from '../core/metrics/bridgeMetrics';
-import { generateCFOInsight } from '../core/insight/generateCFOInsight';
 
 import { verifyJournalIntegrity } from '../utils/debugIntegrity';
-import { generateMonthlyPnL } from '../core/reporting/generateMonthlyPnL';
-import { generateCashFlow } from '../core/reporting/generateCashFlow';
 import { projectScenarioFrontend } from '../core/simulation/strategicSimulator';
-import { generateProjectionLedger, buildMetrics } from '../core/ssotEngine';
-import { runStrategicCompassEngine, StrategicEngineInput } from '../engines/strategicCompassEngine';
+import { runStrategicCompassEngine } from '../engines/strategicCompassEngine';
+import { sumCashAccounts } from '../core/ssot/cashTruth';
 
 const CustomChartTooltip = ({ active, payload, label, stats }: any) => {
     if (active && payload && payload.length) {
@@ -312,89 +304,30 @@ const StrategicCompass: React.FC = () => {
         console.log("🔥 [RESET] Scenario data cleared. Falling back to Actual Ledger.");
     };
 
-    const ANALYSIS_YEARS = useMemo(() => {
-        if (!selectedDate) return [2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035];
-        const startY = new Date(selectedDate).getFullYear();
-        const endY = new Date(new Date(selectedDate).getFullYear(), new Date(selectedDate).getMonth() + projectionMonths).getFullYear();
-        const years = [];
-        for (let y = startY - 2; y <= endY; y++) years.push(y);
-        return years;
-    }, [selectedDate, projectionMonths]);
-
-    const actualPnL = useMemo(() => generateMonthlyPnL(actualLedger, ANALYSIS_YEARS, selectedDate), [actualLedger, selectedDate]);
-    const scenarioPnL = useMemo(() => generateMonthlyPnL([...actualLedger, ...scenarioLedger], ANALYSIS_YEARS, selectedDate), [actualLedger, scenarioLedger, selectedDate]);
-    const baselinePnL = useMemo(() => generateMonthlyPnL([...actualLedger, ...baselineEntries], ANALYSIS_YEARS, selectedDate), [actualLedger, baselineEntries, selectedDate]);
-
-    const ssotMetrics = useMemo(() => buildMetrics(generateProjectionLedger({ actualLedger: [...actualLedger, ...scenarioLedger] })), [actualLedger, scenarioLedger]);
-    const baselineCashFlow = useMemo(() => generateCashFlow([...actualLedger, ...baselineEntries], 0), [actualLedger, baselineEntries]);
-
-    const { chartData: legacyChartData, anchorValidation } = useMemo(() => {
-        if (!financials || !actualLedger.length) return { chartData: [], anchorValidation: null };
-        const anchorMonthFormatted = (actualLedger.reduce((max, e) => e.date > max ? e.date : max, actualLedger[0].date)).substring(0, 7);
-        const anchorCF = ssotMetrics.cashflow.find((c: any) => c.date === anchorMonthFormatted);
-        const offset = financials.cash - (anchorCF ? anchorCF.cash : 0);
-        const actualPnLMap = new Map(actualPnL.map((p: any) => [p.month, p]));
-        const scenarioPnLMap = new Map(scenarioPnL.map((p: any) => [p.month, p]));
-        const baselinePnLMap = new Map(baselinePnL.map((p: any) => [p.month, p]));
-        const baseCFMap = new Map(baselineCashFlow.map((c: any) => [c.date, c]));
-        const nowIndex = ssotMetrics.cashflow.findIndex((cf: any) => cf.date === anchorMonthFormatted);
-
-        const data = ssotMetrics.cashflow.map((cf: any, index: number) => {
-            const actual = actualPnLMap.get(cf.date);
-            const scenario = scenarioPnLMap.get(cf.date);
-            const baseline = baselinePnLMap.get(cf.date);
-            const baseCF = baseCFMap.get(cf.date);
-            return {
-                month: cf.date.substring(2).replace('-', '/'),
-                fullMonth: cf.date,
-                BaselineCash: (baseCF?.cash ?? 0) + offset,
-                ScenarioCash: cf.cash + offset,
-                ScenarioProfit: scenario?.operatingProfit ?? 0,
-                ScenarioNetIncome: scenario?.netIncome ?? 0,
-                ActualProfit: index <= nowIndex ? (actual?.operatingProfit ?? 0) : 0,
-                BaselineProfit: baseline?.operatingProfit ?? 0,
-                cashDelta: cf.delta || 0,
-                operatingCashIn: cf.operatingCashIn || 0,
-                cashIn: cf.cashIn || 0,
-                cashOut: cf.cashOut || 0,
-                isFuture: index > nowIndex,
-                isNow: index === nowIndex,
-                index
-            };
-        });
-        return { chartData: data, anchorValidation: { isValid: true, discrepancy: 0, anchor: financials.cash, ssot: financials.cash } };
-    }, [financials, actualLedger, ssotMetrics.cashflow, baselineCashFlow, actualPnL, scenarioPnL, baselinePnL]);
 
     // 🚨 SSOT RULE: KPI calculations MUST NOT be implemented in this file.
     // All metrics must come from engineResult.stats (metricRegistry / engine layer).
     const engineResult = useMemo(() => {
-        if (!financials || !trialBalance || !ssotMetrics.cashflow) return null;
+        if (!selectedDate || !actualLedger.length || !trialBalance) return null;
         
-        // Input Preparation (Atomic)
-        const liquidCash = MetricRegistry.calculateLiquidity(trialBalance);
-        const actualNetProfit = MetricRegistry.calculateNetProfit(trialBalance);
-
-        // 🔥 Debugging Data Flow (SSOT 체크용)
-        console.log("🔥 STRATEGIC COMPASS SSOT", {
-            actualLedger: actualLedger.length,
-            scenarioLedger: scenarioLedger?.length,
-            targetDate: selectedDate,
-            liquidCash: liquidCash?.value
-        });
+        const liquidityFromTB = MetricRegistry.calculateLiquidity(trialBalance);
+        const liquidCashData = {
+            ...liquidityFromTB,
+            grossCash: sumCashAccounts(actualLedger, selectedDate)
+        };
 
         return runStrategicCompassEngine({
-            chartData: legacyChartData, 
-            ssotMetrics, 
-            projectionLedger: scenarioLedger, 
-            actualLedger, // 🔥 실제 장부 명시적 주입
-            selectedDate, 
-            asOfDate: selectedDate, 
-            preMoneyValuation, 
+            actualLedger,
+            projectionLedger: scenarioLedger,
+            baselineEntries,
+            selectedDate,
+            preMoneyValuation,
             investmentAmount,
-            actualNetProfit: actualNetProfit.value, 
-            liquidCash
+            liquidCashData,
+            projectionMonths,
+            coa: accounts
         });
-    }, [financials, trialBalance, legacyChartData, ssotMetrics, scenarioLedger, actualLedger, selectedDate, preMoneyValuation, investmentAmount, version]);
+    }, [trialBalance, scenarioLedger, actualLedger, baselineEntries, selectedDate, preMoneyValuation, investmentAmount, projectionMonths, version]);
 
     const stats = engineResult?.stats as any;
 
@@ -423,58 +356,31 @@ const StrategicCompass: React.FC = () => {
         burnBreakdown
     } = stats || {};
 
+    const chartData = engineResult?.chartData || [];
     const advice = stats?.insight;
+    const equityAnalysis = stats?.equityAnalysis;
     const equitySignal = getEquitySignal(strategicRunway);
-
-    const chartData = engineResult?.chartData ?? legacyChartData ?? [];
 
     const nowIndex = useMemo(() => chartData.findIndex(d => d.isNow), [chartData]);
     const cashOutX = useMemo(() => (stats?.cashOutMonth && chartData[stats.cashOutMonth]) ? chartData[stats.cashOutMonth].month : null, [stats?.cashOutMonth, chartData]);
     const bepX = useMemo(() => (breakEvenMonth != null && chartData[breakEvenMonth]) ? chartData[breakEvenMonth].month : null, [breakEvenMonth, chartData]);
     const equityX = useMemo(() => (stats?.cashOutMonth && chartData.length) ? chartData[Math.max(stats.cashOutMonth - 6, 0)]?.month : null, [stats?.cashOutMonth, chartData]);
 
-    const equityAnalysis = useMemo(() => {
-        if (!stats || !ssotMetrics.cashflow || nowIndex === -1) return null;
-        const futureDeltas = ssotMetrics.cashflow.map(cf => cf.delta);
-        const liquidOffset = stats.liquidCash.value - financials.cash;
-        let fundingIndex = -1;
-        let fundingRemainingRunway = 0;
-        let fundingReason: any = null;
-        for (let i = nowIndex; i < ssotMetrics.cashflow.length; i++) {
-            const currentItem = ssotMetrics.cashflow[i];
-            const remRunway = calculateSequentialRunway({ currentCash: currentItem.cash, futureCashDeltas: futureDeltas.slice(i) });
-            const remLiquidRunway = (currentItem.cash + liquidOffset) / (calculateCashBurn(futureDeltas.slice(i)) || 1);
-            if (remLiquidRunway < 6 || remRunway < 6) {
-                fundingIndex = i; fundingRemainingRunway = Math.min(remRunway, remLiquidRunway); fundingReason = remLiquidRunway < 6 ? 'LIQUIDITY' : 'RUNWAY';
-                break;
-            }
-        }
-        if (fundingIndex === -1) return { fundingNeeded: 0, fundingIndex: -1, control: report.controlState };
-        const fbAvgBurn = calculateCashBurn(futureDeltas.slice(fundingIndex)) || 1;
-        const fundingNeeded = requiredFunding(fundingRemainingRunway, 18, fbAvgBurn);
-        const dilution = calculateDilution(preMoneyValuation || 500000000, fundingNeeded);
-        return {
-            fundingNeeded, fundingIndex, fundingRemainingRunway, fundingRunwayAtEvent: fundingRemainingRunway,
-            dilution, control: report.controlState, timing: analyzeFundingTiming({ runwayMonths: fundingRemainingRunway }),
-            insight: generateEquityInsight({ runway: fundingRemainingRunway, dilution, control: report.controlState, timing: analyzeFundingTiming({ runwayMonths: fundingRemainingRunway }) }),
-            fundingReason, failIndex: ssotMetrics.cashflow.findIndex((cf, i) => i >= nowIndex && cf.cash <= 0)
-        };
-    }, [stats, preMoneyValuation, ssotMetrics.cashflow, nowIndex, report.controlState, financials.cash]);
-
-    const dilutionAnalysis = useMemo(() => {
-        if (!equityAnalysis?.fundingNeeded || equityAnalysis.fundingNeeded <= 0) return null;
-        const postMoney = (preMoneyValuation || 500000000) + equityAnalysis.fundingNeeded;
-        const investorShare = equityAnalysis.fundingNeeded / postMoney;
-        return { investorShare, founderShare: 1 - investorShare, controlState: (1 - investorShare) >= 0.5 ? 'MAJORITY_CONTROL' : 'CONTROL_LOST' };
-    }, [equityAnalysis?.fundingNeeded, preMoneyValuation]);
-
     const fundingEvent = useMemo(() => {
         if (!equityAnalysis || !chartData || equityAnalysis.fundingIndex === -1) return null;
-        return { index: equityAnalysis.fundingIndex, date: chartData[equityAnalysis.fundingIndex]?.month, failDate: equityAnalysis.failIndex !== -1 ? chartData[equityAnalysis.failIndex]?.month : null, fundingNeeded: equityAnalysis.fundingNeeded, remainingRunway: equityAnalysis.fundingRemainingRunway, reason: equityAnalysis.fundingReason };
+        const idx = equityAnalysis.fundingIndex as number;
+        return { 
+            index: idx, 
+            date: chartData[idx]?.month, 
+            failDate: equityAnalysis.failIndex !== -1 ? chartData[equityAnalysis.failIndex as number]?.month : null, 
+            fundingNeeded: equityAnalysis.fundingNeeded, 
+            remainingRunway: equityAnalysis.timing?.runwayMonths || 0, 
+            reason: equityAnalysis.fundingReason 
+        };
     }, [chartData, equityAnalysis]);
 
     const fundingX = fundingEvent?.date || null;
-    const fundingSignal = fundingEvent ? (fundingEvent.reason === 'LIQUIDITY' ? { label: '🔴 Funding Needed', color: '#ef4444' } : { label: '🟡 Funding Needed', color: '#f59e0b' }) : null;
+    const fundingSignal = fundingEvent ? { label: '🔴 Funding Needed', color: '#ef4444' } : null;
 
     return (
         <div className="flex-1 bg-[#07090F] min-h-screen text-slate-100 p-8 lg:p-12">
@@ -514,7 +420,13 @@ const StrategicCompass: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-10">
                             <ExplainableKPI
                                 label="최근 평균 현금 소진액"
-                                result={{ value: Math.abs(burnBreakdown?.netCashAvg || 0), formula: 'Cash In - Cash Out (Avg)', period: 'Recent 6m', dataSource: 'scenario' }}
+                                result={{ 
+                                    value: Math.abs(burnBreakdown?.netCashAvg || 0), 
+                                    formula: 'Cash In - Cash Out (Avg)', 
+                                    period: 'Recent 6m', 
+                                    dataSource: 'scenario',
+                                    inputs: { 'Net Cash Delta (Avg)': burnBreakdown?.netCashAvg || 0 }
+                                }}
                                 color={burnBreakdown?.isBurning ? "text-rose-500" : "text-emerald-400"}
                                 formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>}
                             />
@@ -526,7 +438,7 @@ const StrategicCompass: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <ExplainableKPI label="💸 Survival Runway" result={stats?.liquidityRunway || null} color={survivalRunway >= 6 ? 'text-blue-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
                     <ExplainableKPI label="📈 Strategic Runway" result={stats?.runway || null} color={strategicRunway >= 12 ? 'text-emerald-400' : 'text-rose-400'} formatValue={(v) => <span className="text-xl font-black italic">{(v === null || v === undefined) ? "지속 가능" : (v === Infinity ? "∞" : `${v.toFixed(1)}개월`)}</span>} />
-                    <ExplainableKPI label="흑자 전환 시점" result={{ value: breakEvenMonth || 0, formula: 'Scenario Net Income > 0 Check', period: 'Simulation', dataSource: 'scenario' } as any} color="text-indigo-400" formatValue={(v) => <span className="text-xl font-black italic">{breakEvenMonth != null ? `${breakEvenMonth}개월` : "N/A"}</span>} />
+                    <ExplainableKPI label="흑자 전환 시점" result={{ value: stats?.breakEvenOffset || 0, formula: 'Scenario Net Income > 0 Check', period: 'Simulation', dataSource: 'scenario' } as any} color="text-indigo-400" formatValue={(v) => <span className="text-xl font-black italic">{stats?.breakEvenOffset != null ? `${stats.breakEvenOffset}개월` : "N/A"}</span>} />
                     <ExplainableKPI label="Gross Burn" result={{ value: grossBurn, formula: 'Avg Cash Outflow', period: 'Recent 6m', dataSource: 'scenario' } as any} color="text-slate-400" formatValue={(v) => <span className="text-xl font-black italic">{formatCurrency(v)}</span>} />
                 </div>
 
@@ -555,8 +467,8 @@ const StrategicCompass: React.FC = () => {
                              <h3 className="text-sm font-black text-white italic tracking-tighter uppercase mb-6 flex items-center gap-2"><Database size={16} /> Data Integrity</h3>
                              <div className="space-y-4">
                                 <div className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
-                                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">Anchor Drift</span>
-                                    <span className={`text-[10px] font-black italic ${anchorValidation?.isValid ? 'text-emerald-400' : 'text-rose-400'}`}>{anchorValidation?.isValid ? 'NOMINAL' : 'DRIFT DETECTED'}</span>
+                                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">Anchor Basis</span>
+                                    <span className="text-[10px] font-black italic text-emerald-400">LEDGER TRUTH</span>
                                 </div>
                              </div>
                         </section>
