@@ -156,6 +156,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 const newTrail = [...(tx.auditTrail || []), `[${new Date().toLocaleTimeString()}] AI 정밀 재분석 완료`];
 
                 newData[i] = {
+                    ...row,
                     ...tx,
                     date: (tx.date || row.date || '').toString(),
                     amount: Number(tx.amount || row.amount || 0),
@@ -163,7 +164,10 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                     description: (tx.description || row.description || '').toString(),
                     entryType: (tx.entryType || row.entryType || 'Expense') as any,
                     reasoning: (tx.reasoning || row.reasoning || '').toString(),
-                    auditTrail: newTrail
+                    auditTrail: newTrail,
+                    isJournalMode: row.isJournalMode,
+                    debitAccount: tx.debitAccount || row.debitAccount,
+                    creditAccount: tx.creditAccount || row.creditAccount
                 } as ParsedTransaction;
                 setStagedData([...newData]);
             }
@@ -222,13 +226,22 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 : tx.reasoning;
 
             // --- Advanced Pairing Logic (Deterministic first) ---
-            let debitAccount = getDisplayAccountName(tx.debitAccount || tx.accountName);
+            let debitAccount = getDisplayAccountName(tx.debitAccount);
             let creditAccount = getDisplayAccountName(tx.creditAccount);
+            const mainAccount = getDisplayAccountName(tx.accountName);
 
-            // Default Mapping 보강
-            if (!debitAccount) debitAccount = '미지정 계정';
-            if (!creditAccount) {
-                creditAccount = tx.entryType === 'Revenue' ? '현금/보통예금' : '미지급금';
+            if (!debitAccount && !creditAccount && mainAccount) {
+                const type = tx.entryType || 'Expense';
+                if (['Revenue', 'Equity', 'Liability'].includes(type) || mainAccount.includes('자본') || mainAccount.includes('차입') || mainAccount.includes('매출')) {
+                    debitAccount = '보통예금';
+                    creditAccount = mainAccount;
+                } else {
+                    debitAccount = mainAccount;
+                    creditAccount = '미지급금';
+                }
+            } else {
+                if (!debitAccount) debitAccount = mainAccount || '미지정 계정';
+                if (!creditAccount) creditAccount = tx.entryType === 'Revenue' ? '보통예금' : '미지급금';
             }
 
             const entry: JournalEntry = {
@@ -1288,21 +1301,37 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                             : tx.reasoning;
 
                                         // Determine Debit/Credit accounts based on composite position or simple entry logic
-                                        let debitAccount = getDisplayAccountName(tx.debitAccount || tx.accountName) || '계정 미지정';
-                                        let creditAccount = getDisplayAccountName(tx.creditAccount) || (tx.entryType === 'Revenue' ? (getDisplayAccountName(tx.accountName) || '현금/매수금') : '미지급금');
+                                        let debitAccount = getDisplayAccountName(tx.debitAccount);
+                                        let creditAccount = getDisplayAccountName(tx.creditAccount);
+                                        const mainAccount = getDisplayAccountName(tx.accountName);
 
-                                        if (tx.isJournalMode && (tx.debitAccount || tx.creditAccount)) {
-                                            debitAccount = getDisplayAccountName(tx.debitAccount) || '[분개그룹 클리어링]';
-                                            creditAccount = getDisplayAccountName(tx.creditAccount) || '[분개그룹 클리어링]';
+                                        if (tx.isJournalMode && (debitAccount || creditAccount)) {
+                                            debitAccount = debitAccount || '[분개그룹 클리어링]';
+                                            creditAccount = creditAccount || '[분개그룹 클리어링]';
                                         } else if (tx.position === 'Debit') {
-                                            debitAccount = getDisplayAccountName(tx.accountName) || '계정 미지정';
+                                            debitAccount = mainAccount || '계정 미지정';
                                             creditAccount = '[분개그룹 클리어링]';
                                         } else if (tx.position === 'Credit') {
                                             debitAccount = '[분개그룹 클리어링]';
-                                            creditAccount = getDisplayAccountName(tx.accountName) || '계정 미지정';
-                                        } else if (!tx.isJournalMode && tx.entryType === 'Payroll') {
-                                            debitAccount = tx.debitAccount || '급여';
-                                            creditAccount = tx.creditAccount || '미지급급여';
+                                            creditAccount = mainAccount || '계정 미지정';
+                                        } else {
+                                            if (!debitAccount && !creditAccount && mainAccount) {
+                                                const type = tx.entryType || 'Expense';
+                                                if (['Revenue', 'Equity', 'Liability'].includes(type) || mainAccount.includes('자본') || mainAccount.includes('차입') || mainAccount.includes('매출')) {
+                                                    debitAccount = '보통예금';
+                                                    creditAccount = mainAccount;
+                                                } else {
+                                                    debitAccount = mainAccount;
+                                                    creditAccount = '미지급금';
+                                                }
+                                            } else {
+                                                if (!debitAccount) debitAccount = mainAccount || '계정 미지정';
+                                                if (!creditAccount) creditAccount = tx.entryType === 'Revenue' ? '보통예금' : '미지급금';
+                                            }
+                                            if (!tx.isJournalMode && tx.entryType === 'Payroll') {
+                                                debitAccount = tx.debitAccount || '급여';
+                                                creditAccount = tx.creditAccount || '미지급급여';
+                                            }
                                         }
 
                                         return {
