@@ -7,13 +7,13 @@ import { DepreciationScheduleModal } from '../components/assets/DepreciationSche
 import { Calendar } from 'lucide-react';
 
 export const Assets: React.FC = () => {
-    const { assets: contextAssets } = useContext(AccountingContext)!;
+    const { assets: contextAssets, deleteAsset } = useContext(AccountingContext)!;
     const [selectedAsset, setSelectedAsset] = React.useState<Asset | null>(null);
 
-    const assets = contextAssets;
+    const assets = contextAssets || [];
 
-    const totalCost = assets.reduce((acc, curr) => acc + curr.cost, 0);
-    const totalCurrent = assets.reduce((acc, curr) => acc + curr.currentValue, 0);
+    const totalCost = assets.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0);
+    const totalCurrent = assets.reduce((acc, curr) => acc + (Number(curr.currentValue) || 0), 0);
 
     const handleRunDepreciation = async () => {
         try {
@@ -120,7 +120,7 @@ export const Assets: React.FC = () => {
                 <div className="bg-[#151D2E] border border-white/5 p-8 rounded-[2rem] shadow-2xl relative group overflow-hidden">
                     <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">월 예상 상각비</p>
                     <h3 className="text-3xl font-black text-rose-400 tracking-tight">
-                        ₩{assets.length > 0 ? (totalCost / 60 / 1000000).toFixed(1) + 'M' : '0.0M'}
+                        ₩{assets.length > 0 ? ((totalCost / (60 * 1000000)) || 0).toFixed(1) + 'M' : '0.0M'}
                     </h3>
                     <div className="mt-4 flex items-center gap-2 text-rose-400 text-xs font-bold">
                         <TrendingDown size={14} />
@@ -159,23 +159,33 @@ export const Assets: React.FC = () => {
                                         </div>
                                     </td>
                                     <td className="px-8 py-6 text-right">
-                                        <p className="text-slate-400 font-bold text-sm">₩{asset.cost.toLocaleString()}</p>
+                                        <p className="text-slate-400 font-bold text-sm">₩{(Number(asset.cost) || 0).toLocaleString()}</p>
                                     </td>
                                     <td className="px-8 py-6 text-right">
-                                        <p className="text-rose-500/70 font-bold text-sm">₩{asset.accumulatedDepreciation.toLocaleString()}</p>
+                                        <p className="text-rose-500/70 font-bold text-sm">₩{(Number(asset.accumulatedDepreciation) || 0).toLocaleString()}</p>
                                     </td>
                                     <td className="px-8 py-6 text-right">
-                                        <p className="text-emerald-400 font-black text-lg">₩{Math.round(asset.currentValue).toLocaleString()}</p>
+                                        <p className="text-emerald-400 font-black text-lg">₩{Math.round(Number(asset.currentValue) || 0).toLocaleString()}</p>
                                     </td>
                                     <td className="px-8 py-6 text-center">
                                         <div className="flex items-center justify-center gap-3">
-                                            <span className="bg-slate-800 text-slate-400 px-3 py-1 rounded-full text-[10px] font-black">{asset.usefulLife} Years</span>
                                             <button
                                                 onClick={() => setSelectedAsset(asset)}
                                                 className="p-2 hover:bg-indigo-500/10 text-slate-500 hover:text-indigo-400 rounded-lg transition-colors group-hover:bg-indigo-500/5"
                                                 title="감가상각 스케줄 보기"
                                             >
                                                 <Calendar size={16} />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    if (window.confirm('이 자산을 대장에서 삭제하시겠습니까?')) {
+                                                        deleteAsset(asset.id);
+                                                    }
+                                                }}
+                                                className="p-2 hover:bg-rose-500/10 text-slate-600 hover:text-rose-400 rounded-lg transition-colors group-hover:bg-rose-500/5"
+                                                title="자산 삭제"
+                                            >
+                                                <Plus className="rotate-45" size={16} />
                                             </button>
                                         </div>
                                     </td>

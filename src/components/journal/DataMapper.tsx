@@ -17,6 +17,8 @@ const STANDARD_FIELDS = [
     { key: 'vendor', label: '거래처명 (Vendor)', info: '가맹점이나 상호명이 들어갑니다.', required: false },
     { key: 'description', label: '거래 내용 (Description)', info: '적요 또는 품명으로 사용됩니다.', required: false },
     { key: 'amount', label: '금액 (Amount)', info: '숫자 형식만 지원합니다.', required: true },
+    { key: 'debit_account', label: '차변 계정 (Debit)', info: '복식 부기용 차변 계정 컬럼', required: false },
+    { key: 'credit_account', label: '대변 계정 (Credit)', info: '복식 부기용 대변 계정 컬럼', required: false },
     { key: 'payment_type', label: '결제 수단 (Payment)', info: '카드/현금/계좌이체 등', required: false },
 ];
 
@@ -59,8 +61,19 @@ export const DataMapper: React.FC<DataMapperProps> = ({ fileName, headers: rawHe
         Object.entries(initialMapping).forEach(([header, standard]) => {
             reversed[standard] = header;
         });
+
+        // [Advanced] Fuzzy Intelligence for Accounting Headers if missing
+        if (!reversed['debit_account']) {
+            const h = headers.find(h => h.includes('차변') || h.toLowerCase().includes('debit'));
+            if (h) reversed['debit_account'] = h;
+        }
+        if (!reversed['credit_account']) {
+            const h = headers.find(h => h.includes('대변') || h.toLowerCase().includes('credit'));
+            if (h) reversed['credit_account'] = h;
+        }
+
         setFieldToHeader(reversed);
-    }, [initialMapping]);
+    }, [initialMapping, headers]);
 
     const applyPreset = (presetName: string) => {
         const preset = bankPresets.find(p => p.name === presetName);

@@ -50,8 +50,8 @@ export const calculateFinancialsFromTB = (trialBalance: TrialBalance): Financial
         }
     });
 
-    const revenue = operatingRevenue + grantRevenue;
-    const netIncome = (operatingRevenue + grantRevenue) - expenses;
+    const revenue = operatingRevenue; // [CORRECTED] Revenue should only include core business operations
+    const netIncome = (operatingRevenue + grantRevenue) - expenses; // Net income still includes grants as other income
     let accumulatedRetainedEarnings = 0;
     let shareCapital = 0;
 

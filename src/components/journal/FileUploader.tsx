@@ -131,11 +131,18 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                 mapping
             });
 
-            if (results.length === 0) {
-                throw new Error("변환된 데이터가 없습니다. 날짜와 금액 컬럼이 올바르게 매핑되었는지, 또는 데이터 포맷이 맞는지 확인해주세요.");
-            }
+            // [CFO Strategy] Determine if this is a Double-Entry Journal based on actual mapping
+            const isDoubleEntryMapped = !!(mapping['debit_account'] && mapping['credit_account']);
 
-            onTransactionsLoaded(results);
+            const finalResults = results.map(r => ({
+                ...r,
+                isJournalMode: r.isJournalMode || isDoubleEntryMapped,
+                // Mark as user-confirmed if the relevant account was explicitly mapped from the file
+                isUserConfirmed: true,
+                originalAmount: r.amount
+            }));
+
+            onTransactionsLoaded(finalResults);
             setMapperOpen(false);
             setPendingFile(null);
         } catch (err: any) {

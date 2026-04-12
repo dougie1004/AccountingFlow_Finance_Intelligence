@@ -205,8 +205,8 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                     date: dateStr,
                     description: `[VOUCHER] 정부보조금 바우처 집행 (${month}월분)`,
                     vendor: '한국디지털진흥원',
-                    debitAccount: '서비스이용료(바우처)', // Non-cash expense offset
-                    debitAccountId: 'acc_802',
+                    debitAccount: '지급수수료', // Standardizing from '서비스이용료(바우처)'
+                    debitAccountId: 'acc_811',
                     creditAccount: '정부보조금수익',
                     creditAccountId: 'acc_403',
                     amount: grantTranche,
@@ -383,7 +383,7 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                     const totalMkt = effectiveMkt + Math.floor(effectiveMkt * 0.1);
                     const mktId = `MKT-AP-${year}-${month}`;
                     // [Accrual] Marketing via AP (Legacy "Risk Exposure" simulation)
-                    ledger.push({ id: mktId, date: dateStr, description: `[MKT] 마케팅비 청구`, vendor: 'Google/FB', debitAccount: '마케팅비', debitAccountId: 'acc_826', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: effectiveMkt, vat: Math.floor(effectiveMkt * 0.1), type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });
+                    ledger.push({ id: mktId, date: dateStr, description: `[MKT] 마케팅비 청구`, vendor: 'Google/FB', debitAccount: '광고선전비', debitAccountId: 'acc_826', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: effectiveMkt, vat: Math.floor(effectiveMkt * 0.1), type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });
                     
                     const payMkt = Math.floor(totalMkt * 0.8); // 80% payment only to leave debt
                     ledger.push({ id: `MKT-PAY-${year}-${month}`, date: dateStr, description: `[SETTLE] 마케팅비 결제 (80% 우선집행)`, vendor: 'Google/FB', debitAccount: '미지급금', debitAccountId: 'acc_253', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: payMkt, vat: 0, type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });

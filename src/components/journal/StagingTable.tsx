@@ -31,21 +31,29 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
 
     // Convert AI semantic tags (acc_xxx) to readable names
     const getDisplayAccountName = (rawName: string | undefined): string => {
-        if (!rawName || rawName === '대기 중') return ''; // '대기 중' 오염 방지
+        if (!rawName || rawName === '대기 중') return ''; 
         
-        // 1. Try direct lookup in context accounts (by ID or Name)
+        // 1. [SOVEREIGNTY] Try direct name match first. 
+        // If the string itself is an existing account name, trust it over any code tags.
         if (accounts) {
             const accList = Object.values(accounts) as any[];
-            const found = accList.find(a => a.id === rawName || a.name === rawName);
-            if (found) return found.name;
+            // Direct hit on Name?
+            const foundByName = accList.find(a => a.name === rawName);
+            if (foundByName) return foundByName.name;
+
+            // Direct hit on ID (Legacy support)?
+            const foundById = accList.find(a => a.id === rawName);
+            if (foundById) return foundById.name;
         }
 
-        // 2. Fallback to acc_ tag parsing (Legacy/Static)
+        // 2. [FALLBACK] acc_ tag parsing (for when only IDs are provided)
         if (rawName.startsWith('acc_')) {
             const code = rawName.replace('acc_', '').replace('_v', '');
             const foundStatic = ALL_ACCOUNTS.find(a => a.code === code);
             if (foundStatic) return foundStatic.name;
         }
+
+        // 3. Last Resort: Return the string as-is
         return rawName;
     };
     const { parseTransaction, isParsing } = useAI();
@@ -88,21 +96,32 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
             let totalCredit = 0;
 
             rows.forEach(r => {
-                // Should strictly use 'position' if imported from CSV that supports it
-                // Or fallback to entryType if simple
-                if (r.position === 'Debit') totalDebit += r.amount;
-                else if (r.position === 'Credit') totalCredit += r.amount;
+                const amountWithVat = Number(r.amount || 0) + Number(r.vat || 0);
+
+                // [CFO FIX] If it's a single balanced row (Journal Mode), it contributes to BOTH sides
+                if (r.isJournalMode || (r.debitAccount && r.creditAccount)) {
+                    totalDebit += amountWithVat;
+                    totalCredit += amountWithVat;
+                    return;
+                }
+
+                if (r.position === 'Debit') totalDebit += amountWithVat;
+                else if (r.position === 'Credit') totalCredit += amountWithVat;
                 else {
-                    // Fallback heuristics if 'position' is missing in early MVP data
-                    // Expense/Asset usually Debit, Revenue/Liab/Equity usually Credit
-                    // BUT in a composite journal, position MUST be explicit.
-                    // For now, if position is missing, we assume it's a single-line simple entry that AI hasn't fully parsed for composite yet.
-                    if (['Expense', 'Asset'].includes(r.entryType || '')) totalDebit += r.amount;
-                    else totalCredit += r.amount;
+                    // Smart Heuristics for single-line mappings
+                    const drTypes = ['Expense', 'Asset', 'Payroll', 'Investment', 'Drawings'];
+                    const crTypes = ['Revenue', 'Equity', 'Liability', 'Funding', 'Sales'];
+                    
+                    if (drTypes.includes(r.entryType || '')) totalDebit += amountWithVat;
+                    else if (crTypes.includes(r.entryType || '')) totalCredit += amountWithVat;
+                    else {
+                        // If totally unknown, treat as Debit (Defense)
+                        totalDebit += amountWithVat;
+                    }
                 }
             });
 
-            if (Math.abs(totalDebit - totalCredit) > 10) { // Tolerance for minor floating point
+            if (Math.abs(totalDebit - totalCredit) > 100) { 
                 imbalancedGroups.push({
                     id,
                     debit: totalDebit,
@@ -166,8 +185,11 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                     reasoning: (tx.reasoning || row.reasoning || '').toString(),
                     auditTrail: newTrail,
                     isJournalMode: row.isJournalMode,
-                    debitAccount: tx.debitAccount || row.debitAccount,
-                    creditAccount: tx.creditAccount || row.creditAccount
+                    // [Sovereignty] Only overwrite accounts if NOT confirmed by user
+                    debitAccount: (row.isUserConfirmed && row.debitAccount) ? row.debitAccount : (tx.debitAccount || row.debitAccount),
+                    creditAccount: (row.isUserConfirmed && row.creditAccount) ? row.creditAccount : (tx.creditAccount || row.creditAccount),
+                    accountName: (row.isUserConfirmed && row.accountName) ? row.accountName : (tx.accountName || row.accountName),
+                    aiSuggestion: tx.accountName || tx.debitAccount // Store AI's opinion separately
                 } as ParsedTransaction;
                 setStagedData([...newData]);
             }
@@ -370,11 +392,19 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                             <tbody className="divide-y divide-white/5">
                                 {displayData.map((row, dIdx) => {
                                     const idx = row.originalIndex;
+                                    const isSameGroup = dIdx > 0 && row.transactionId && displayData[dIdx-1].transactionId === row.transactionId;
+                                    
                                     return (
                                         <tr
                                             key={idx}
                                             onClick={() => setSelectedRow(idx)}
-                                            className={`transition-all cursor-pointer ${idx === analyzingIndex ? 'bg-indigo-500/5' : ''} ${selectedRow === idx ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'}`}
+                                            className={`transition-all cursor-pointer 
+                                                ${idx === analyzingIndex ? 'bg-indigo-500/5' : ''} 
+                                                ${selectedRow === idx ? 'bg-white/[0.04]' : 'hover:bg-white/[0.02]'}
+                                                ${isSameGroup ? 'border-t-0' : 'border-t border-white/5'}
+                                                ${row.transactionId ? 'group-row' : ''}
+                                                ${isSameGroup ? '!bg-white/[0.01]' : ''}
+                                            `}
                                         >
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center gap-2">
@@ -479,9 +509,24 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                                         <Loader2 size={12} className="animate-spin" /> 연산 중
                                                     </span>
                                                 ) : (
-                                                    <span className={`px-3 py-1 rounded-lg font-black text-xs ${getDisplayAccountName(row.accountName) ? 'bg-indigo-500/10 text-indigo-400' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                                                        {getDisplayAccountName(row.accountName) || '계정 미지정'}
-                                                    </span>
+                                                    <div className="flex flex-col gap-1.5 min-w-[120px]">
+                                                        {row.isJournalMode || (row.debitAccount && row.creditAccount) ? (
+                                                            <>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[9px] font-black border border-emerald-500/10">Dr</span>
+                                                                    <span className="text-[10px] font-black text-slate-200">{getDisplayAccountName(row.debitAccount) || '미지정'}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 text-[9px] font-black border border-rose-500/10">Cr</span>
+                                                                    <span className="text-[10px] font-black text-slate-200">{getDisplayAccountName(row.creditAccount) || '미지정'}</span>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <span className={`px-3 py-1 rounded-lg font-black text-xs w-fit ${getDisplayAccountName(row.accountName) ? 'bg-indigo-500/10 text-indigo-400' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                                                                {getDisplayAccountName(row.accountName) || '계정 미지정'}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4">
@@ -518,6 +563,76 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                             </tbody>
                         </table>
                     </div>
+
+                    {/* [Integrity V2] Trial Balance Health Check (Real-time Batch Verification) */}
+                    {isJournalBatch && (
+                        <div className="mt-4 p-4 bg-[#0B1221] border border-white/5 rounded-2xl flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                                    <Shield size={18} />
+                                </div>
+                                <div>
+                                    <h4 className="text-[11px] font-black text-white uppercase">Batch Integrity Status</h4>
+                                    <p className="text-[10px] font-bold text-slate-500">Staged rows vs Mapping logic balance check</p>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-6">
+                                <div className="text-right">
+                                    <p className="text-[9px] font-black text-slate-600 uppercase">Debit Total</p>
+                                    <p className="text-sm font-black text-emerald-400">
+                                        ₩{stagedData.reduce((sum, r) => {
+                                            const val = Number(r.amount || 0) + Number(r.vat || 0);
+                                            // [CFO FIX] Journal mode adds to both
+                                            if (r.isJournalMode || (r.debitAccount && r.creditAccount)) return sum + val;
+                                            
+                                            const drTypes = ['Expense', 'Asset', 'Payroll', 'Investment', 'Drawings'];
+                                            return sum + (r.position === 'Debit' ? val : (drTypes.includes(r.entryType || '') ? val : 0));
+                                        }, 0).toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-[9px] font-black text-slate-600 uppercase">Credit Total</p>
+                                    <p className="text-sm font-black text-rose-400">
+                                        ₩{stagedData.reduce((sum, r) => {
+                                            const val = Number(r.amount || 0) + Number(r.vat || 0);
+                                            // [CFO FIX] Journal mode adds to both
+                                            if (r.isJournalMode || (r.debitAccount && r.creditAccount)) return sum + val;
+
+                                            const crTypes = ['Revenue', 'Equity', 'Liability', 'Funding', 'Sales'];
+                                            return sum + (r.position === 'Credit' ? val : (crTypes.includes(r.entryType || '') ? val : 0));
+                                        }, 0).toLocaleString()}
+                                    </p>
+                                </div>
+                                <div className="pl-4 border-l border-white/5 flex items-center">
+                                    {(() => {
+                                        const drTotal = stagedData.reduce((sum, r) => {
+                                            const val = Number(r.amount || 0) + Number(r.vat || 0);
+                                            if (r.isJournalMode || (r.debitAccount && r.creditAccount)) return sum + val;
+                                            const drTypes = ['Expense', 'Asset', 'Payroll', 'Investment', 'Drawings'];
+                                            return sum + (r.position === 'Debit' ? val : (drTypes.includes(r.entryType || '') ? val : 0));
+                                        }, 0);
+                                        const crTotal = stagedData.reduce((sum, r) => {
+                                            const val = Number(r.amount || 0) + Number(r.vat || 0);
+                                            if (r.isJournalMode || (r.debitAccount && r.creditAccount)) return sum + val;
+                                            const crTypes = ['Revenue', 'Equity', 'Liability', 'Funding', 'Sales'];
+                                            return sum + (r.position === 'Credit' ? val : (crTypes.includes(r.entryType || '') ? val : 0));
+                                        }, 0);
+                                        
+                                        return Math.abs(drTotal - crTotal) < 500 ? (
+                                            <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl text-[10px] font-black">
+                                                <CheckCircle2 size={14} /> COMPOSITE BALANCED
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-xl text-[10px] font-black animate-pulse">
+                                                <AlertTriangle size={14} /> IMBALANCED
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Info / Audit Side Panel */}
@@ -582,6 +697,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                                 if (suggestion?.suggestedPaymentMethod) {
                                                     newData[selectedRow].paymentMethod = suggestion.suggestedPaymentMethod as any;
                                                 }
+                                                newData[selectedRow].isUserConfirmed = true; // User accepted this, protect it
                                                 setStagedData(newData);
                                             }}
                                             className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black rounded-lg transition-all shadow-lg shadow-indigo-600/20 active:scale-95"
@@ -660,7 +776,14 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                             {/* Persistent Edit Section */}
                             <div className="bg-[#0B1221] rounded-2xl p-4 border border-white/5 space-y-4">
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">Account (계정과목)</label>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1 flex items-center justify-between">
+                                        <span>Account (계정과목)</span>
+                                        {stagedData[selectedRow].isUserConfirmed ? (
+                                            <span className="text-[8px] bg-indigo-500/20 text-indigo-400 px-1.5 rounded tracking-normal">Manual/User</span>
+                                        ) : (
+                                            <span className="text-[8px] bg-slate-500/20 text-slate-500 px-1.5 rounded tracking-normal italic">AI Suggestion</span>
+                                        )}
+                                    </label>
                                     <input
                                         list="staging-account-list"
                                         value={getDisplayAccountName(stagedData[selectedRow].accountName) || stagedData[selectedRow].accountName || ""}
@@ -670,6 +793,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                             newData[selectedRow].needsClarification = false;
                                             newData[selectedRow].confidence = "High";
                                             newData[selectedRow].reasoning = "사용자 수동 입력";
+                                            newData[selectedRow].isUserConfirmed = true; // Flag as confirmed
                                             setStagedData(newData);
                                         }}
                                         placeholder={stagedData[selectedRow].isJournalMode ? "Primary Account (Optional in Journal Mode)" : "계정과목을 입력하거나 선택하세요..."}
@@ -679,24 +803,32 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     {stagedData[selectedRow].isJournalMode && (
                                         <div className="grid grid-cols-2 gap-4 pt-2">
                                             <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-emerald-400 uppercase tracking-wider block ml-1">Debit Account (차변)</label>
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-[9px] font-black text-emerald-400 uppercase tracking-wider block ml-1">Debit Account (차변)</label>
+                                                    {stagedData[selectedRow].isUserConfirmed && <span className="text-[7px] text-emerald-500/50 font-black">USER</span>}
+                                                </div>
                                                 <input
                                                     value={getDisplayAccountName(stagedData[selectedRow].debitAccount) || stagedData[selectedRow].debitAccount || ""}
                                                     onChange={(e) => {
                                                         const newData = [...stagedData];
                                                         newData[selectedRow].debitAccount = e.target.value;
+                                                        newData[selectedRow].isUserConfirmed = true;
                                                         setStagedData(newData);
                                                     }}
                                                     className="w-full px-3 py-2 bg-emerald-500/5 border border-emerald-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
                                                 />
                                             </div>
                                             <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-rose-400 uppercase tracking-wider block ml-1">Credit Account (대변)</label>
+                                                <div className="flex justify-between items-center">
+                                                    <label className="text-[9px] font-black text-rose-400 uppercase tracking-wider block ml-1">Credit Account (대변)</label>
+                                                    {stagedData[selectedRow].isUserConfirmed && <span className="text-[7px] text-rose-500/50 font-black">USER</span>}
+                                                </div>
                                                 <input
                                                     value={getDisplayAccountName(stagedData[selectedRow].creditAccount) || stagedData[selectedRow].creditAccount || ""}
                                                     onChange={(e) => {
                                                         const newData = [...stagedData];
                                                         newData[selectedRow].creditAccount = e.target.value;
+                                                        newData[selectedRow].isUserConfirmed = true;
                                                         setStagedData(newData);
                                                     }}
                                                     className="w-full px-3 py-2 bg-rose-500/5 border border-rose-500/20 rounded-lg text-white font-bold text-xs focus:ring-1 focus:ring-rose-500 outline-none"
@@ -754,6 +886,41 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                         className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95"
                                     >
                                         <CheckCircle2 size={16} /> 현재 전표 확인 및 상태 확정 (Confirm Entry)
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => {
+                                            const base = stagedData[selectedRow];
+                                            const newId = `TX-${crypto.randomUUID().slice(0, 8)}`;
+                                            const transactionId = base.transactionId || newId;
+
+                                            // Update base if it didn't have a transactionId
+                                            const newData = [...stagedData];
+                                            if (!base.transactionId) {
+                                                newData[selectedRow] = { ...base, transactionId };
+                                            }
+
+                                            // Insert new row below
+                                            const newRow: ParsedTransaction = {
+                                                ...base,
+                                                id: `NEW-${crypto.randomUUID().slice(0, 4)}`,
+                                                transactionId,
+                                                amount: 0,
+                                                accountName: "",
+                                                debitAccount: "",
+                                                creditAccount: "",
+                                                isUserConfirmed: true,
+                                                reasoning: `자유 분개 추가 (Linked to ${base.description})`,
+                                                auditTrail: [`[${new Date().toLocaleTimeString()}] 사용자에 의해 분개 라인 추가됨`]
+                                            };
+
+                                            newData.splice(selectedRow + 1, 0, newRow);
+                                            setStagedData(newData);
+                                            alert('새로운 분개 라인이 생성되었습니다. 차변/대변 금액 합계를 확인해 주세요.');
+                                        }}
+                                        className="w-full py-2.5 bg-white/5 border border-white/10 hover:bg-white/10 text-slate-300 font-black text-[10px] rounded-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest mt-2"
+                                    >
+                                        <Plus size={14} /> 복합 분개 라인 추가 (Split/Add Line)
                                     </button>
                                 </div>
 
@@ -1336,6 +1503,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
 
                                         return {
                                             id,
+                                            transactionId: tx.transactionId,
                                             date: tx.date || new Date().toISOString().split('T')[0],
                                             description: tx.description,
                                             vendor: tx.vendor,

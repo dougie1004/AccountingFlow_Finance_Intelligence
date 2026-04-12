@@ -26,6 +26,7 @@ export interface AccountingContextType {
     deleteEntry: (id: string) => void;
     assets: Asset[];
     addAsset: (asset: Asset) => void;
+    deleteAsset: (id: string) => void;
     updateInventory: (id: string, updates: Partial<InventoryItem>) => void;
     scmOrders: Order[];
     addScmOrder: (order: Order) => void;
@@ -95,14 +96,35 @@ const INITIAL_DATA: JournalEntry[] = [];
 export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const isDev = !(import.meta as any).env.PROD;
     const isInitialLoad = React.useRef(true);
-    const [ledger, setLedger] = useState<JournalEntry[]>(INITIAL_DATA);
+    const [ledger, setLedger] = useState<JournalEntry[]>(() => {
+        const saved = localStorage.getItem('accounting_ledger_v3');
+        return saved ? JSON.parse(saved) : INITIAL_DATA;
+    });
     const [loading, setLoading] = useState(true);
-    const [partners, setPartners] = useState<Partner[]>([]);
-    const [assets, setAssets] = useState<Asset[]>([]);
-    const [inventory, setInventory] = useState<InventoryItem[]>([]);
-    const [scmOrders, setScmOrders] = useState<Order[]>([]);
-    const [stagingTransactions, setStagingTransactions] = useState<ParsedTransaction[]>([]);
-    const [finalizedMonths, setFinalizedMonths] = useState<Record<string, 'soft' | 'hard'>>({});
+    const [partners, setPartners] = useState<Partner[]>(() => {
+        const saved = localStorage.getItem('accounting_partners');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [assets, setAssets] = useState<Asset[]>(() => {
+        const saved = localStorage.getItem('accounting_assets');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [inventory, setInventory] = useState<InventoryItem[]>(() => {
+        const saved = localStorage.getItem('accounting_inventory');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [scmOrders, setScmOrders] = useState<Order[]>(() => {
+        const saved = localStorage.getItem('accounting_scm_orders');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [stagingTransactions, setStagingTransactions] = useState<ParsedTransaction[]>(() => {
+        const saved = localStorage.getItem('accounting_staging_txs');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [finalizedMonths, setFinalizedMonths] = useState<Record<string, 'soft' | 'hard'>>(() => {
+        const saved = localStorage.getItem('accounting_finalized_months');
+        return saved ? JSON.parse(saved) : {};
+    });
     const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
     const [accounts, setAccounts] = useState<Record<string, AccountDefinition>>(() => {
         // [Integrity Sync] Merge core COA with all master accounts for maximum coverage
@@ -452,9 +474,11 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                     });
                 }
 
-                // [AUTO-REGISTRATION] Detect New Assets (Fixed Asset Accounts on Debit)
-                const assetAccounts = ['비품', '기계장치', '차량운반구', '소프트웨어', '건물'];
-                if (assetAccounts.some(acc => e.debitAccount?.includes(acc))) {
+                // [AUTO-REGISTRATION] Detect New Assets (ONLY for verified Fixed Asset accounts)
+                const fixedAssetAccounts = ['비품', '기계장치', '차량운반구', '소프트웨어', '건물', '토지', '시설장치'];
+                const isFixedAsset = fixedAssetAccounts.some(acc => e.debitAccount === acc);
+                
+                if (isFixedAsset) {
                     addAsset({
                         id: `asset_${Date.now()}`,
                         name: e.description,
@@ -561,6 +585,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         setAssets(prev => [...prev, asset]);
     };
 
+    const deleteAsset = (id: string) => {
+        setAssets(prev => prev.filter(a => a.id !== id));
+    };
+
     const updateConfig = (updates: Partial<TenantConfig>) => {
         setConfig(prev => ({ ...prev, ...updates }));
     };
@@ -596,16 +624,94 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     };
 
     const resetData = useCallback(() => {
-        isInitialLoad.current = false; // Prevent auto-fill after manual reset
-        setLedger([]);
+        if (!window.confirm("모든 장부 데이터와 설정을 초기화하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
+
+        isInitialLoad.current = false; 
+        setLedger(INITIAL_DATA);
+        setPartners([]);
+        setAssets([]);
         setInventory([]);
         setScmOrders([]);
-        setAssets([]);
-        setPartners([]);
         setStagingTransactions([]);
         setFinalizedMonths({});
+        setScenarioResultsState([]);
+        setBaselineSnapshotState(null);
+        setBaselineEntriesState([]);
+        setBaselineTimestampState(null);
         setSelectedDate(new Date().toISOString().split('T')[0]);
-        console.log("[AccountingFlow] Manual data reset performed. Global date reset to today. Auto-fill disabled.");
+
+        // Clear Persistence
+        const keysToRemove = [
+            'accounting_ledger_v3', 'accounting_partners', 'accounting_assets', 
+            'accounting_inventory', 'accounting_scm_orders', 'accounting_staging_txs', 
+            'accounting_finalized_months', 'accounting_accounts', 'accounting_scenario_results',
+            'accounting_baseline_snapshot', 'accounting_baseline_entries', 'accounting_baseline_timestamp'
+        ];
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+
+        console.log("[AccountingFlow] Manual data reset performed. Storage cleared.");
+        alert("데이터가 초기화되었습니다.");
+    }, []);
+
+    // [V2.8] MASTER PERSISTENCE EFFECT (LocalStorage + Tauri FS Bridge)
+    useEffect(() => {
+        if (isInitialLoad.current && ledger.length === INITIAL_DATA.length) return;
+
+        const syncToStorage = async () => {
+            // 1. LocalStorage Sync
+            localStorage.setItem('accounting_ledger_v3', JSON.stringify(ledger));
+            localStorage.setItem('accounting_partners', JSON.stringify(partners));
+            localStorage.setItem('accounting_assets', JSON.stringify(assets));
+            localStorage.setItem('accounting_inventory', JSON.stringify(inventory));
+            localStorage.setItem('accounting_scm_orders', JSON.stringify(scmOrders));
+            localStorage.setItem('accounting_staging_txs', JSON.stringify(stagingTransactions));
+            localStorage.setItem('accounting_finalized_months', JSON.stringify(finalizedMonths));
+            localStorage.setItem('accounting_accounts', JSON.stringify(accounts));
+
+            // 2. Tauri FS Sync (Hard Persistence for Desktop App)
+            if ((window as any).__TAURI__) {
+                try {
+                    const { writeTextFile, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+                    await writeTextFile('auditflow_v1_ledger.json', JSON.stringify({
+                        ledger, partners, assets, inventory, scmOrders, finalizedMonths,
+                        timestamp: Date.now()
+                    }), { dir: BaseDirectory.AppData });
+                    console.log("[Tauri FS] Ledger state persisted to local disk.");
+                } catch (err) {
+                    console.error("[Tauri FS] Persistence failed:", err);
+                }
+            }
+        };
+
+        syncToStorage();
+    }, [ledger, partners, assets, inventory, scmOrders, stagingTransactions, finalizedMonths, accounts]);
+
+    // [V2.8] Initial Tauri Load Bridge
+    useEffect(() => {
+        const loadFromTauri = async () => {
+            if ((window as any).__TAURI__ && ledger.length === 0) {
+                try {
+                    const { readTextFile, exists, BaseDirectory } = await import('@tauri-apps/plugin-fs');
+                    const filePath = 'auditflow_v1_ledger.json';
+                    if (await exists(filePath, { dir: BaseDirectory.AppData })) {
+                        const content = await readTextFile(filePath, { dir: BaseDirectory.AppData });
+                        const parsed = JSON.parse(content);
+                        if (parsed.ledger) {
+                            setLedger(parsed.ledger);
+                            if (parsed.partners) setPartners(parsed.partners);
+                            if (parsed.assets) setAssets(parsed.assets);
+                            if (parsed.inventory) setInventory(parsed.inventory);
+                            if (parsed.scmOrders) setScmOrders(parsed.scmOrders);
+                            if (parsed.finalizedMonths) setFinalizedMonths(parsed.finalizedMonths);
+                            console.log("[Tauri FS] State restored from local disk.");
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[Tauri FS] Restore failed:", err);
+                }
+            }
+        };
+        loadFromTauri();
     }, []);
 
     const performClosing = (month: string, type: 'soft' | 'hard') => {
@@ -839,6 +945,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             partners,
             assets,
             addAsset,
+            deleteAsset,
             config,
             updateConfig,
             addEntry,

@@ -64,7 +64,9 @@ export function useAI() {
         tenantId: string,
         tier: string,
         imageBytes?: number[],
-        imageMime?: string
+        imageMime?: string,
+        existingDebit?: string, // [FUTURE] 유저가 입력한 기존 차변 계정
+        existingCredit?: string // [FUTURE] 유저가 입력한 기존 대변 계정
     ): Promise<AnalysisResponse | null> => {
         setIsParsing(true);
         setError(null);
@@ -145,25 +147,27 @@ export function useAI() {
                 const desc = (result.transaction.description || input).toLowerCase();
                 const amount = result.transaction.amount || 0;
 
-                // 1. Contextual Inference: Initial Capital / Series Funding
-                if (desc.includes('initial capital') || desc.includes('seed funding') || desc.includes('series a') || desc.includes('투자')) {
+                // 1. Contextual Inference: Initial Capital / Series Funding (Multilingual Support)
+                if (desc.includes('initial capital') || desc.includes('seed funding') || desc.includes('series a') || 
+                    desc.includes('투자') || desc.includes('자본금') || desc.includes('납입')) {
                     if (result.transaction.entryType !== 'Equity') {
                         result.transaction.entryType = 'Equity';
                         result.transaction.accountName = '자본금';
                         result.transaction.confidence = 'High';
-                        result.transaction.reasoning = `[Antigravity Cortex] 'Initial Capital' Context Detected -> Auto-corrected to Equity (Confidence: 99.9%). Original AI Assessment: ${result.transaction.reasoning}`;
-                        result.transaction.creditAccount = '자본금'; // Ensure Pairing
-                        result.transaction.debitAccount = '보통예금'; // Ensure Pairing
+                        result.transaction.reasoning = `[Antigravity Cortex] 'Capital' Context Detected (KR/EN) -> Auto-corrected to Equity. Original AI Assessment: ${result.transaction.reasoning}`;
+                        result.transaction.creditAccount = '자본금';
+                        result.transaction.debitAccount = '보통예금';
                     }
                 }
-
-                // 2. Grant Detection Intelligence
-                if ((desc.includes('grant') && desc.includes('deposit')) || desc.includes('보조금') || desc.includes('지원금')) {
-                    if (result.transaction.entryType !== 'Revenue') { // Grants are non-operating revenue
+                
+                // 2. Grant Detection Intelligence (Multilingual Support)
+                if ((desc.includes('grant') && desc.includes('deposit')) || 
+                    desc.includes('보조금') || desc.includes('지원금') || desc.includes('바우처')) {
+                    if (result.transaction.entryType !== 'Revenue') { 
                         result.transaction.entryType = 'Revenue';
-                        result.transaction.accountName = '국고보조금수익'; // Specific Account
+                        result.transaction.accountName = '국고보조금수익';
                         result.transaction.confidence = 'High';
-                        result.transaction.reasoning = `[Antigravity Cortex] 'Grant' Pattern Detected -> Classified as Non-Operating Revenue.`;
+                        result.transaction.reasoning = `[Antigravity Cortex] 'Grant/Voucher' Pattern Detected (KR/EN) -> Classified as Non-Operating Revenue.`;
                         result.transaction.creditAccount = '국고보조금수익';
                         result.transaction.debitAccount = '보통예금';
                     }

@@ -8,6 +8,7 @@ export type PartnerType = 'Vendor' | 'Customer' | 'Employee';
 
 export interface JournalEntry {
     id: string;
+    transactionId?: string;
     date: string; // ISO 8601
     description: string;
     vendor?: string; // Optional - 거래처가 없을 수 있음
@@ -324,6 +325,8 @@ export interface ParsedTransaction {
     clarificationPrompt?: string;
     clarificationOptions?: string[];
     isConsultation?: boolean;
+    isUserConfirmed?: boolean; // NEW - 유저가 직접 매핑/입력한 데이터 보호용
+    aiSuggestion?: string;    // NEW - AI가 추천한 계정 저장용 (Overwrite 방지)
     confidence?: string;
     paymentMethod?: 'Card' | 'Cash' | 'Transfer';
     bankName?: string;      // NEW - 지급 요청용

@@ -307,6 +307,11 @@ export const Reports: React.FC<{ setTab: (tab: string) => void }> = ({ setTab })
                     </div>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">당월 총 매출 <span className="text-slate-600">(REVENUE)</span></p>
                     <h2 className="text-3xl font-black text-white tracking-tighter italic">₩{financials.revenue.toLocaleString()}</h2>
+                    {financials.grantRevenue > 0 && (
+                        <p className="text-[10px] text-indigo-400 mt-2 font-black uppercase tracking-widest animate-in fade-in slide-in-from-bottom-1 duration-500">
+                            기타 수익(보조금): ₩{financials.grantRevenue.toLocaleString()}
+                        </p>
+                    )}
                 </div>
 
                 <div className="bg-[#1A1F2B] p-8 rounded-[2rem] border border-white/5 relative overflow-hidden group">

@@ -51,8 +51,17 @@ const JournalTable: React.FC<JournalTableProps> = ({ entries }) => {
                             </td>
                         </tr>
                     ) : (
-                        entries.map((entry) => (
-                            <tr key={entry.id} className="hover:bg-white/[0.02] transition-colors group">
+                        entries.map((entry, idx) => {
+                            const isSameGroup = idx > 0 && entry.transactionId && entries[idx-1].transactionId === entry.transactionId;
+                            
+                            return (
+                                <tr 
+                                    key={entry.id} 
+                                    className={`hover:bg-white/[0.02] transition-colors group
+                                        ${isSameGroup ? 'border-t-0' : 'border-t border-white/5'}
+                                        ${isSameGroup ? '!bg-white/[0.01]' : ''}
+                                    `}
+                                >
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400 font-mono font-bold">
                                     {entry.status === 'Approved' ? (
                                         entry.date
@@ -201,7 +210,7 @@ const JournalTable: React.FC<JournalTableProps> = ({ entries }) => {
                                     </button>
                                 </td>
                             </tr>
-                        ))
+                        )})
                     )}
                 </tbody>
             </table>
