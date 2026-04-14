@@ -186,7 +186,8 @@ ${yearlyBreakdown}
 
             const response = await safeInvoke("ask_ai_assistant", {
                 message: structuredPrompt,
-                tenantId: tenantId
+                tenantId: tenantId,
+                tier: context?.config.tier || "Free"
             });
 
             if (!response || typeof response !== "string") {
@@ -194,7 +195,9 @@ ${yearlyBreakdown}
             }
 
             setMessages(prev => [...prev, { role: "bot", content: response }]);
+            context?.refreshQuota(); // Refresh immediately after deduction
             setIsTyping(false);
+
         } catch (err) {
             console.error(err);
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -217,10 +220,15 @@ ${yearlyBreakdown}
 
                 const extractedText = await safeInvoke("train_knowledge_from_file", {
                     bytes: Array.from(bytes),
-                    mime: mime
+                    mime: mime,
+                    tenantId: tenantId,
+                    tier: context?.config.tier || "Free"
                 }) as string;
 
+
+
                 setTempKnowledge(prev => (prev ? prev + "\n\n" : "") + extractedText);
+                context?.refreshQuota(); // Refresh after training
                 setIsTraining(false);
             };
             reader.readAsArrayBuffer(file);
@@ -267,7 +275,24 @@ ${yearlyBreakdown}
                             <Trash2 size={18} />
                             <span className="text-[11px] font-black uppercase tracking-widest hidden group-hover:block transition-all duration-300">Reset Session</span>
                         </button>
+
+                        {/* Quota Indicator */}
+                        <div className="ml-4 px-4 py-2 bg-blue-500/5 border border-blue-500/20 rounded-2xl flex flex-col items-end gap-0.5">
+                            <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">AI Quota Status</span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-black text-white">
+                                    {context?.quotaStatus?.daily_units || 0} / {context?.config.tier === 'Pro' ? 500 : 20}
+                                </span>
+                                <div className="w-12 h-1 bg-white/10 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-1000"
+                                        style={{ width: `${Math.min(100, ((context?.quotaStatus?.daily_units || 0) / (context?.config.tier === 'Pro' ? 500 : 20)) * 100)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
                     <div className="flex flex-wrap gap-2.5">
                         {suggestions.map((s, i) => (
                             <SuggestionChip key={i} label={s.label} icon={s.icon} onClick={handleSend} />

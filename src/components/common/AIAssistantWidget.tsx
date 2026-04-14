@@ -74,7 +74,8 @@ export const AIAssistantWidget: React.FC = () => {
     const [isTyping, setIsTyping] = useState(false);
     const [isMaximized, setIsMaximized] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const { config, ledger, financials, companyKnowledge, selectedDate } = useContext(AccountingContext)!;
+    const { config, ledger, financials, companyKnowledge, selectedDate, refreshQuota } = useContext(AccountingContext)!;
+
 
 
     const clearHistory = () => {
@@ -132,14 +133,17 @@ If the user asks about periodic performance, prioritize the 'Financial Summary' 
 
             const response = await safeInvoke("ask_ai_assistant", {
                 message: structuredPrompt,
-                tenantId: config.tenantId
+                tenantId: config.tenantId,
+                tier: config.tier || "Free"
             });
+
 
             if (!response || typeof response !== "string") {
                 throw new Error("Invalid response from analysis engine.");
             }
 
             setMessages(prev => [...prev, { role: "bot", content: response }]);
+            refreshQuota();
             setIsTyping(false);
         } catch (err: any) {
             console.error("AI Assistant Widget Error:", err);

@@ -95,7 +95,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
     ];
 
     const SidebarContent = () => {
-        const { resetData } = useContext(AccountingContext)!;
+        const { resetData, quotaStatus, config: contextConfig } = useContext(AccountingContext)!;
+
         const { theme, setTheme } = useTheme();
         const [profile, setProfile] = useState<any>(null);
         const [showPaywall, setShowPaywall] = useState(false);
@@ -124,10 +125,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
         let displayMenu = [...menuGroups];
         const isAdmin = profile?.is_admin === true || String(profile?.is_admin).toLowerCase() === 'true';
         
-        // Derived AI limits based on current plan
-        let aiLimit = 50; 
-        if (profile?.plan === 'standard') aiLimit = 200;
-        else if (profile?.plan === 'pro') aiLimit = -1;
+        // Derived AI limits based on current plan & local context
+        let aiLimit = (profile?.plan === 'pro' || (contextConfig as any).tier === 'Pro') ? 500 : 20; 
+        
+        // Quota values - Prefer real-time local gateway data
+        const currentUsage = quotaStatus?.daily_units ?? profile?.ai_usage_count ?? 0;
+        const maxLimit = (contextConfig as any).tier === 'Pro' ? 500 : (profile?.plan === 'pro' ? 500 : 20);
+
 
         // Trial Expiry Logic
         let daysLeft = 999;
@@ -238,13 +242,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                         </div>
                         <div className="w-full bg-white/5 h-1.5 rounded-full mb-1 overflow-hidden">
                             <div 
-                                className="bg-indigo-500 h-full transition-all duration-500" 
-                                style={{ width: `${aiLimit === -1 ? 100 : Math.min(((profile?.ai_usage_count || 0) / aiLimit) * 100, 100)}%` }} 
+                                className="bg-indigo-500 h-full transition-all duration-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" 
+                                style={{ width: `${Math.min((currentUsage / maxLimit) * 100, 100)}%` }} 
                             />
                         </div>
                         <div className="text-right text-[9px] font-bold text-slate-500 mb-3 uppercase tracking-wider">
-                            AI QUERIES: <span className="text-indigo-400">{profile?.ai_usage_count || 0}</span> / {aiLimit === -1 ? '∞' : aiLimit}
+                            AI QUERIES: <span className="text-indigo-400">{currentUsage}</span> / {maxLimit}
                         </div>
+
                         <button 
                             onClick={() => {
                                 console.log("🔘 Button primitive clicked");

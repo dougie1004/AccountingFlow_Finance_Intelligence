@@ -5,6 +5,8 @@ use uuid::Uuid;
 pub async fn ingest_universal_file(
     file_bytes: Vec<u8>,
     file_name: String,
+    tenant_id: String,
+    tier: String,
 ) -> Result<Vec<ParsedTransaction>, String> {
     let path = Path::new(&file_name);
     let extension = path.extension()
@@ -41,10 +43,20 @@ pub async fn ingest_universal_file(
             let safe_text = crate::utils::pii_guard::apply_deidentification(&raw_text);
             
             println!("[Universal Ingestor] Calling Journal AI for Unstructured Text...");
-            let mut ai_res = crate::ai::ai_service::call_journal_ai(&safe_text, None, "Unstructured Data Policy", "default", "Pro").await?;
-            ai_res.audit_trail.push(source_info.clone());
-            println!("[Universal Ingestor] Completed AI analysis for Text file.");
-            Ok(vec![ai_res])
+            let ai_res_result = crate::ai::ai_service::call_journal_ai(&safe_text, None, "Unstructured Data Policy", &tenant_id, &tier).await;
+            
+            match ai_res_result {
+                Ok(mut ai_res) => {
+                    ai_res.audit_trail.push(source_info.clone());
+                    println!("[Universal Ingestor] Completed AI analysis for Text file.");
+                    Ok(vec![ai_res])
+                },
+                Err(e) => {
+                    // Refund on failure
+                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 1);
+                    Err(e)
+                }
+            }
         }
         "hwp" => {
             // HWP Heuristic Extraction -> PII Mask -> AI
@@ -55,12 +67,20 @@ pub async fn ingest_universal_file(
             
             let prompt_context = format!("HWP Document Content:\n{}", safe_text);
             println!("[Universal Ingestor] Calling Journal AI for HWP content...");
-            let mut ai_res = crate::ai::ai_service::call_journal_ai(&prompt_context, None, "HWP Document Policy", "default", "Pro").await?;
+            let ai_res_result = crate::ai::ai_service::call_journal_ai(&prompt_context, None, "HWP Document Policy", &tenant_id, &tier).await;
             
-            ai_res.audit_trail.push(source_info.clone());
-            ai_res.reasoning.push_str(" | HWP Text Analysis with PII Guard");
-            println!("[Universal Ingestor] Completed AI analysis for HWP file.");
-            Ok(vec![ai_res])
+            match ai_res_result {
+                Ok(mut ai_res) => {
+                    ai_res.audit_trail.push(source_info.clone());
+                    ai_res.reasoning.push_str(" | HWP Text Analysis with PII Guard");
+                    println!("[Universal Ingestor] Completed AI analysis for HWP file.");
+                    Ok(vec![ai_res])
+                },
+                Err(e) => {
+                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 1);
+                    Err(e)
+                }
+            }
         }
         "docx" | "pptx" => {
             // Office XML Text Extraction -> PII Mask -> AI
@@ -70,29 +90,48 @@ pub async fn ingest_universal_file(
             let safe_text = crate::utils::pii_guard::apply_deidentification(&raw_text);
             
             println!("[Universal Ingestor] Calling Journal AI for Office content...");
-            let mut ai_res = crate::ai::ai_service::call_journal_ai(&safe_text, None, "Office Document Policy", "default", "Pro").await?;
+            let ai_res_result = crate::ai::ai_service::call_journal_ai(&safe_text, None, "Office Document Policy", &tenant_id, &tier).await;
             
-            ai_res.audit_trail.push(source_info.clone());
-            ai_res.reasoning.push_str(&format!(" | {} Analysis with PII Guard", extension.to_uppercase()));
-            println!("[Universal Ingestor] Completed AI analysis for Office file.");
-            Ok(vec![ai_res])
+            match ai_res_result {
+                Ok(mut ai_res) => {
+                    ai_res.audit_trail.push(source_info.clone());
+                    ai_res.reasoning.push_str(&format!(" | {} Analysis with PII Guard", extension.to_uppercase()));
+                    println!("[Universal Ingestor] Completed AI analysis for Office file.");
+                    Ok(vec![ai_res])
+                },
+                Err(e) => {
+                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 1);
+                    Err(e)
+                }
+            }
         }
         "pdf" | "jpg" | "jpeg" | "png" | "image" => {
             // Universal Media (Vision) -> AI
             println!("[Universal Ingestor] Sending Media file to Vision AI (Extension: {})", extension);
-            let mut ai_res = crate::ai::ai_service::extract_transaction_from_media(file_bytes, &extension).await?;
+            let ai_res_result = crate::ai::ai_service::extract_transaction_from_media(file_bytes, &extension, &tenant_id, &tier).await;
             
-            // Apply Local Rule Engine (Suggestion Only)
-            ai_res.suggestion = crate::ai::rule_based_classifier::classify_by_rules(&ai_res);
-            
-            ai_res.audit_trail.push(source_info.clone());
-            ai_res.reasoning.push_str(" | Vision Analysis + Local Rules");
-            println!("[Universal Ingestor] Completed Vision AI analysis with local rule enforcement.");
-            Ok(vec![ai_res])
+            match ai_res_result {
+                Ok(mut ai_res) => {
+                    // Apply Local Rule Engine (Suggestion Only)
+                    ai_res.suggestion = crate::ai::rule_based_classifier::classify_by_rules(&ai_res);
+                    
+                    ai_res.audit_trail.push(source_info.clone());
+                    ai_res.reasoning.push_str(" | Vision Analysis + Local Rules");
+                    println!("[Universal Ingestor] Completed Vision AI analysis with local rule enforcement.");
+                    Ok(vec![ai_res])
+                },
+                Err(e) => {
+                    // Refund 5 units for Vision
+                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 5);
+                    Err(e)
+                }
+            }
         }
         _ => Err(format!("Unsupported file format: .{}", extension)),
+
     }
 }
+
 
 fn attach_source_info(transactions: &mut Vec<ParsedTransaction>, source_info: &str) {
     for tx in transactions {

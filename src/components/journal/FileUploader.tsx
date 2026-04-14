@@ -18,7 +18,8 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
     const [pendingFile, setPendingFile] = useState<{ bytes: number[], name: string, headers: string[], initialMapping: Record<string, string> } | null>(null);
     const [isMappingProgress, setIsMappingProgress] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
-    const { config } = useAccounting();
+    const { config, refreshQuota } = useAccounting();
+
 
     const processFiles = async (files: File[]) => {
         if (files.length === 0) return;
@@ -55,8 +56,12 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                 // AI Processing (Unstructured or Fallback)
                 const results = await invoke<ParsedTransaction[]>('process_universal_file', {
                     fileBytes: Array.from(bytes),
-                    fileName: file.name
+                    fileName: file.name,
+                    tenantId: config.tenantId || "default",
+                    tier: config.tier || "Free"
                 });
+
+
 
                 if (results && results.length > 0) {
                     // 1. Image Preview Logic
@@ -102,13 +107,15 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
             }
 
             if (allParsed.length === 0 && !mapperOpen) {
-                // If mapper is open, we don't throw error yet
                 if (!pendingFile) {
                     throw new Error('데이터 분석에 실패했습니다. 파일 형식을 확인하거나 데이터가 포함되어 있는지 확인해 주세요.');
                 }
             } else if (allParsed.length > 0) {
                 onTransactionsLoaded(allParsed);
+                refreshQuota(); // Update quota indicator
             }
+
+
 
         } catch (err: any) {
             console.error('Upload Error:', err);

@@ -98,7 +98,11 @@ pub fn run() {
             commands::ask_ai_assistant,
             commands::train_knowledge_from_file,
             commands::generate_close_readiness_report,
+            commands::get_quota_status,
+            commands::sync_quota_status,
             scenario_manager::debug_echo_journals,
+
+
             crate::core::strategic::cap_table_service::simulate_cap_table_command
         ])
         .run(tauri::generate_context!())

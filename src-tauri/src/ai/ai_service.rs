@@ -2,6 +2,11 @@ use crate::core::models::ParsedTransaction;
 use serde_json::json;
 
 // [Antigravity] Centralized Model Configuration
+// [Antigravity] AI Cost Weights
+pub const WEIGHT_TEXT: u32 = 1;
+pub const WEIGHT_VISION: u32 = 5;
+pub const WEIGHT_TRAIN: u32 = 10;
+
 fn get_ai_model() -> String {
     std::env::var("AI_MODEL_NAME").unwrap_or_else(|_| "gemini-2.0-flash-exp".to_string())
 }
@@ -11,9 +16,14 @@ pub async fn call_journal_ai(
     image_data: Option<(Vec<u8>, &str)>, 
     policy: &str, 
     tenant_id: &str, 
-    _tier: &str
+    tier: &str
 ) -> Result<ParsedTransaction, String> {
+    // 0. Quota Check
+    let weight = if image_data.is_some() { WEIGHT_VISION } else { WEIGHT_TEXT };
+    crate::core::quota_manager::QUOTA_MANAGER.can_use_ai(tenant_id, tier, weight)?;
+
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "환경 변수 'GEMINI_API_KEY'가 설정되지 않았습니다.".to_string())?;
+
     let model_name = get_ai_model();
 
     let mut parts = Vec::new();
@@ -140,8 +150,9 @@ pub async fn call_journal_ai(
     parsed.audit_trail.push(format!("[{}] Cognitive Ledger Agent (Pro) 분석 완료", chrono::Local::now().format("%H:%M:%S")));
     println!("[AI Service] Successfully parsed AI response for: {}", parsed.description.as_deref().unwrap_or("Unknown"));
 
-    // STEP 3: 사용량 기록
-    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, 0.00001);
+    // STEP 3: 사용량 기록 (위에서 계산한 weight 적용)
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, weight);
+
 
     // STEP 4: 캐시 저장
     crate::ai::ai_cache::AI_CACHE.set(input, policy, parsed.clone());
@@ -149,8 +160,17 @@ pub async fn call_journal_ai(
     Ok(parsed)
 }
 
-pub async fn extract_transaction_from_media(bytes: Vec<u8>, mime: &str) -> Result<ParsedTransaction, String> {
+pub async fn extract_transaction_from_media(
+    bytes: Vec<u8>, 
+    mime: &str,
+    tenant_id: &str,
+    tier: &str
+) -> Result<ParsedTransaction, String> {
+    // 0. Quota Check (Media extraction is always vision weight)
+    crate::core::quota_manager::QUOTA_MANAGER.can_use_ai(tenant_id, tier, WEIGHT_VISION)?;
+
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "환경 변수 'GEMINI_API_KEY'가 설정되지 않았습니다.".to_string())?;
+
     let model_name = get_ai_model();
 
     // Base64 인코딩
@@ -271,7 +291,8 @@ JSON 응답 형식:
     parsed.audit_trail.push(format!("[{}] Cognitive Vision Agent (Pro) 시각 분석 완료", chrono::Local::now().format("%H:%M:%S")));
 
     // 사용량 기록
-    crate::core::quota_manager::QUOTA_MANAGER.record_usage("default", 0.00002);
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, WEIGHT_VISION);
+
 
     Ok(parsed)
 }
@@ -280,8 +301,14 @@ pub async fn verify_receipt_compliance(
     image_bytes: Vec<u8>,
     image_mime: &str,
     transaction_json: &str,
+    tenant_id: &str,
+    tier: &str
 ) -> Result<ParsedTransaction, String> {
+    // Cross-verification also uses vision
+    crate::core::quota_manager::QUOTA_MANAGER.can_use_ai(tenant_id, tier, WEIGHT_VISION)?;
+
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "환경 변수 'GEMINI_API_KEY'가 설정되지 않았습니다.".to_string())?;
+
     let model_name = get_ai_model();
 
     let base64_data = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, image_bytes);
@@ -348,16 +375,24 @@ pub async fn verify_receipt_compliance(
     updated_tx.needs_clarification = compliance_res["needsClarification"].as_bool().unwrap_or(false);
     updated_tx.reasoning = compliance_res["reasoning"].as_str().unwrap_or("").to_string();
     updated_tx.clarification_prompt = compliance_res["clarificationPrompt"].as_str().map(|s| s.to_string());
-    updated_tx.audit_trail.push(format!("[{}] AI 회계사 영수증 교차 검증 완료 ({})", chrono::Local::now().format("%H:%M:%S"), model_name));
+    // Record usage
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, WEIGHT_VISION);
 
     Ok(updated_tx)
 }
+
 pub async fn consult_compliance_ai(
     user_message: &str,
     current_tx: Option<ParsedTransaction>,
     policy: &str,
+    tenant_id: &str,
+    tier: &str
 ) -> Result<crate::core::models::AnalysisResponse, String> {
+    // 0. Quota Check
+    crate::core::quota_manager::QUOTA_MANAGER.can_use_ai(tenant_id, tier, WEIGHT_TEXT)?;
+
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "환경 변수 'GEMINI_API_KEY'가 설정되지 않았습니다. .env 파일을 확인하세요.".to_string())?;
+
     let model_name = get_ai_model();
 
     let tx_context = if let Some(tx) = current_tx {
@@ -434,11 +469,24 @@ pub async fn consult_compliance_ai(
         rev.review_logs.get_or_insert(vec![]).push("Advisory Session".to_string());
     }
     
+    // Record usage
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, WEIGHT_TEXT);
+
     Ok(res)
 }
 
-pub async fn train_knowledge_from_media(bytes: Vec<u8>, mime: &str) -> Result<String, String> {
+
+pub async fn train_knowledge_from_media(
+    bytes: Vec<u8>, 
+    mime: &str,
+    tenant_id: &str,
+    tier: &str
+) -> Result<String, String> {
+    // Document training is highly resource intensive
+    crate::core::quota_manager::QUOTA_MANAGER.can_use_ai(tenant_id, tier, WEIGHT_TRAIN)?;
+
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY missing".to_string())?;
+
     let model_name = get_ai_model();
 
     let base64_data = base64::Engine::encode(&base64::prelude::BASE64_STANDARD, bytes);
@@ -489,8 +537,9 @@ pub async fn train_knowledge_from_media(bytes: Vec<u8>, mime: &str) -> Result<St
         .trim()
         .to_string();
 
-    // Record usage (Knowledge training is 2x standard cost)
-    crate::core::quota_manager::QUOTA_MANAGER.record_usage("default", 0.00005);
+    // Record usage (Knowledge training weight)
+    crate::core::quota_manager::QUOTA_MANAGER.record_usage(tenant_id, WEIGHT_TRAIN);
 
     Ok(text)
 }
+

@@ -183,9 +183,12 @@ pub async fn process_mass_ai_batch(
 pub async fn process_universal_file(
     file_bytes: Vec<u8>,
     file_name: String,
+    tenant_id: String,
+    tier: String,
 ) -> Result<Vec<ParsedTransaction>, String> {
-    crate::ai::universal_ingestor::ingest_universal_file(file_bytes, file_name).await
+    crate::ai::universal_ingestor::ingest_universal_file(file_bytes, file_name, tenant_id, tier).await
 }
+
 
 #[tauri::command]
 pub fn generate_close_readiness_report(
@@ -396,16 +399,22 @@ pub async fn verify_receipt_compliance(
     image_bytes: Vec<u8>,
     image_mime: String,
     transaction_json: String,
+    tenant_id: String,
+    tier: String,
 ) -> Result<ParsedTransaction, String> {
-    ai_service::verify_receipt_compliance(image_bytes, &image_mime, &transaction_json).await
+    ai_service::verify_receipt_compliance(image_bytes, &image_mime, &transaction_json, &tenant_id, &tier).await
 }
+
 #[tauri::command]
 pub async fn chat_with_compliance(
     user_message: String,
     current_tx: Option<ParsedTransaction>,
     policy: String,
+    tenant_id: String,
+    tier: String,
 ) -> Result<AnalysisResponse, String> {
-    let mut response = ai_service::consult_compliance_ai(&user_message, current_tx, &policy).await?;
+    let mut response = ai_service::consult_compliance_ai(&user_message, current_tx, &policy, &tenant_id, &tier).await?;
+
     
     // Consultation 성격을 표시하기 위해 임의로 transaction에 플래그 설정 (브릿지 역할)
     if response.transaction.is_none() {
@@ -687,12 +696,15 @@ pub async fn get_all_scenarios() -> Result<Vec<Scenario>, String> {
 pub async fn ask_ai_assistant(
     message: String, 
     tenant_id: Option<String>, 
+    tier: Option<String>,
     ledger: Option<Vec<JournalEntry>>,
     financials: Option<FinancialSummary>,
     company_knowledge: Option<String>,
     current_date: Option<String>,
 ) -> Result<String, String> {
     let tenant = tenant_id.unwrap_or_else(|| "default".to_string());
+    let stier = tier.unwrap_or_else(|| "Free".to_string());
+
     println!("[AI Assistant] Processing request for tenant: {}", tenant);
     
     // Construct Enhanced Context
@@ -762,7 +774,8 @@ pub async fn ask_ai_assistant(
 
     // Single efficient consultation call
     let final_prompt = format!("## [Financial Context]\n{}\n\n질문: {}", reasoning, message);
-    let result = ai_service::consult_compliance_ai(&final_prompt, None, &policy).await;
+    let result = ai_service::consult_compliance_ai(&final_prompt, None, &policy, &tenant, &stier).await;
+
     
     match result {
         Ok(res) => {
@@ -774,18 +787,49 @@ pub async fn ask_ai_assistant(
         },
         Err(e) => {
             println!("[AI Assistant] Error: {}", e);
+            // Refund 1 unit for chat failure
+            crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant, 1);
             Err(format!("AI 서비스 연결 실패: {}", e))
         }
+
     }
 }
 
 #[tauri::command]
 pub async fn train_knowledge_from_file(
     bytes: Vec<u8>,
-    mime: &str
+    mime: &str,
+    tenant_id: String,
+    tier: String,
 ) -> Result<String, String> {
-    ai_service::train_knowledge_from_media(bytes, mime).await
+    let result = ai_service::train_knowledge_from_media(bytes, mime, &tenant_id, &tier).await;
+    match result {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 10);
+            Err(e)
+        }
+    }
 }
+
+
+#[tauri::command]
+pub fn get_quota_status(tenant_id: String) -> serde_json::Value {
+    if let Some((daily, monthly, cost)) = crate::core::quota_manager::QUOTA_MANAGER.get_usage(&tenant_id) {
+        serde_json::json!({
+            "daily_units": daily,
+            "monthly_units": monthly,
+            "total_cost_usd": cost
+        })
+    } else {
+        serde_json::json!({
+            "daily_units": 0,
+            "monthly_units": 0,
+            "total_cost_usd": 0.0
+        })
+    }
+}
+
 
 // Helper for quick classification in reasoning
 fn get_account_nature_marker(debit: &str, credit: &str) -> String {
@@ -793,3 +837,9 @@ fn get_account_nature_marker(debit: &str, credit: &str) -> String {
     else if debit.contains("비용") || debit.contains("Expense") { "EXPENSE".to_string() }
     else { "OTHER".to_string() }
 }
+
+#[tauri::command]
+pub fn sync_quota_status(tenant_id: String, cloud_usage: u32) {
+    crate::core::quota_manager::QUOTA_MANAGER.sync_from_cloud(&tenant_id, cloud_usage);
+}
+

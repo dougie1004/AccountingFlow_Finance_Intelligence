@@ -92,7 +92,10 @@ export interface AccountingContextType {
     aiMessages: AiChatMessage[];
     setAiMessages: (msgs: AiChatMessage[] | ((prev: AiChatMessage[]) => AiChatMessage[])) => void;
     clearAiMessages: () => void;
+    quotaStatus: { daily_units: number, monthly_units: number, total_cost_usd: number } | null;
+    refreshQuota: () => Promise<void>;
 }
+
 
 export const AccountingContext = createContext<AccountingContextType | undefined>(undefined);
 
@@ -101,10 +104,107 @@ const INITIAL_DATA: JournalEntry[] = [];
 export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const isDev = !(import.meta as any).env.PROD;
     const isInitialLoad = React.useRef(true);
+
+    const [config, setConfig] = useState<TenantConfig>({
+        tenantId: 'default-tenant',
+        isReadOnly: false,
+        taxPolicy: {
+            depreciationMethod: 'StraightLine',
+            entertainmentLimitBase: 12000000,
+            vatFilingCycle: 'Quarterly',
+            aiGovernanceThreshold: 1000000, // 1M KRW Asset Threshold
+            insuranceRates: {
+                nationalPension: 0.045,
+                healthInsurance: 0.03545,
+                longTermCare: 0.1295, // Within health
+                employmentInsuranceEmployee: 0.009,
+                employmentInsuranceEmployer: 0.0115,
+            },
+            defaultLeaseRate: 0.072
+        }
+    });
+
+    const [quotaStatus, setQuotaStatus] = useState<{ daily_units: number, monthly_units: number, total_cost_usd: number } | null>(null);
+
+    const refreshQuota = useCallback(async () => {
+        try {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const status = await invoke('get_quota_status', { tenantId: config.tenantId }) as any;
+            setQuotaStatus(status);
+        } catch (err) {
+            console.warn("Failed to refresh quota:", err);
+        }
+    }, [config.tenantId]);
+
+    useEffect(() => {
+        refreshQuota();
+    }, [refreshQuota]);
+
+    // [V3.0] Synchronize Local AI Quota Truth to Supabase Cloud
+    useEffect(() => {
+        if (quotaStatus) {
+            const syncToSupabase = async () => {
+                try {
+                    const { data: { session } } = await supabase.auth.getSession();
+                    if (session?.user?.id) {
+                        const { error } = await supabase
+                            .from('user_profile')
+                            .update({ ai_usage_count: quotaStatus.daily_units })
+                            .eq('user_id', session.user.id);
+                        
+                        if (error) console.warn("[Supabase Sync] Quota update failed:", error);
+                        else console.log("[Supabase Sync] Local quota mirrored to cloud:", quotaStatus.daily_units);
+                    }
+                } catch (err) {
+                    console.warn("[Quota Sync] Auth session error:", err);
+                }
+            };
+            syncToSupabase();
+        }
+    }, [quotaStatus?.daily_units]); // Only sync when units actually change
+
+    // [V3.0] Realtime Listener for Remote Quota Resets (Subscription Payment)
+    useEffect(() => {
+        let channel: any;
+        const setupRealtime = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.id) {
+                const { invoke } = await import('@tauri-apps/api/core');
+
+                channel = supabase
+                    .channel('quota-updates')
+                    .on('postgres_changes', { 
+                        event: 'UPDATE', 
+                        schema: 'public', 
+                        table: 'user_profile',
+                        filter: `user_id=eq.${session.user.id}`
+                    }, async (payload: any) => {
+                        const newCloudCount = payload.new.ai_usage_count;
+                        console.log("[Realtime Quota] Remote update detected:", newCloudCount);
+                        
+                        // Action: Sync this count to the Rust Gateway
+                        await invoke('sync_quota_status', { 
+                            tenantId: config.tenantId, 
+                            cloudUsage: newCloudCount 
+                        });
+                        
+                        // Also trigger a refresh in the local context state
+                        refreshQuota();
+                    })
+                    .subscribe();
+            }
+        };
+        setupRealtime();
+        return () => { if (channel) supabase.removeChannel(channel); };
+    }, [config.tenantId, refreshQuota]);
+
+
+
     const [ledger, setLedger] = useState<JournalEntry[]>(() => {
         const saved = localStorage.getItem('accounting_ledger_v3');
         return saved ? JSON.parse(saved) : INITIAL_DATA;
     });
+
     const [loading, setLoading] = useState(true);
     const [partners, setPartners] = useState<Partner[]>(() => {
         const saved = localStorage.getItem('accounting_partners');
@@ -272,26 +372,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         setAiMessages([DEFAULT_AI_MSG]);
     };
 
-    const [config, setConfig] = useState<TenantConfig>({
-        tenantId: 'default-tenant',
-        isReadOnly: false,
-        taxPolicy: {
-            depreciationMethod: 'StraightLine',
-            entertainmentLimitBase: 12000000,
-            vatFilingCycle: 'Quarterly',
-            aiGovernanceThreshold: 1000000, // 1M KRW Asset Threshold
-            insuranceRates: {
-                nationalPension: 0.045,
-                healthInsurance: 0.03545,
-                longTermCare: 0.1295, // Within health
-                employmentInsuranceEmployee: 0.009,
-                employmentInsuranceEmployer: 0.0115,
-            },
-            defaultLeaseRate: 0.072
-        }
-    });
+
 
     const isPeriodLocked = useCallback((date: string) => {
+
         const monthKey = date.slice(0, 7);
         return !!finalizedMonths[monthKey];
     }, [finalizedMonths]);
@@ -1040,8 +1124,23 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             setInvestmentAmount,
             aiMessages,
             setAiMessages,
-            clearAiMessages
+            clearAiMessages,
+            quotaStatus,
+            refreshQuota,
+            config,
+            updateConfig,
+            partners,
+            addPartner,
+            updatePartner,
+            approvePartner,
+            assets,
+            addAsset,
+            deleteAsset,
+            accounts,
+            addAccount,
+            updateAccount
         }}>
+
             {children}
 </AccountingContext.Provider>
     );
