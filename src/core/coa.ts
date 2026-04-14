@@ -54,7 +54,7 @@ export const CHART_OF_ACCOUNTS: Record<string, AccountDefinition> = {
     '여비교통비': { id: 'acc_812', code: '812', name: '여비교통비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
     '통신비': { id: 'acc_813', code: '813', name: '통신비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
     '수도광열비': { id: 'acc_814', code: '814', name: '수도광열비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
-    '마케팅비': { id: 'acc_826', code: '826', name: '마케팅비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
+    '광고선전비': { id: 'acc_826', code: '826', name: '광고선전비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
     '소모품비': { id: 'acc_824', code: '824', name: '소모품비', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
     '기타비용': { id: 'acc_899', code: '899', name: '기타비용', nature: 'EXPENSE', statement: 'PL', section: '영업비용', group: '판매비와관리비' },
 };

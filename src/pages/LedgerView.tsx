@@ -1,15 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAccounting } from '../hooks/useAccounting';
 import { FileText, Search, Calendar, ChevronDown, ArrowUpDown, ChevronUp } from 'lucide-react';
+import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 
 const LedgerView: React.FC = () => {
-    const { accountingLedger, allLinesLedger, partners, selectedDate } = useAccounting();
+    const { 
+        accountingLedger, allLinesLedger, partners, selectedDate,
+        ledgerStartDate: startDate, setLedgerStartDate: setStartDate,
+        ledgerEndDate: endDate, setLedgerEndDate: setEndDate
+    } = useAccounting();
 
-    // Filtering state
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-
-    React.useEffect(() => {
+    useEffect(() => {
         if (!startDate && !endDate && selectedDate) {
             const d = new Date(selectedDate);
             const start = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
@@ -18,7 +19,7 @@ const LedgerView: React.FC = () => {
             setStartDate(start);
             setEndDate(end);
         }
-    }, [selectedDate, startDate, endDate]);
+    }, [selectedDate, startDate, endDate, setStartDate, setEndDate]);
     const [selectedAccount, setSelectedAccount] = useState('전체 계정');
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'all' | 'subledger'>('subledger');
@@ -139,21 +140,14 @@ const LedgerView: React.FC = () => {
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-[#151D2E] p-2 rounded-2xl border border-white/5 shadow-inner">
-                        <Calendar size={18} className="text-slate-500 ml-2" />
-                        <input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-white outline-none focus:ring-0"
-                        />
-                        <span className="text-slate-700">~</span>
-                        <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-white outline-none focus:ring-0 mr-2"
-                        />
+                    <div className="flex items-center gap-1 bg-[#151D2E] p-1.5 rounded-2xl border border-white/5 shadow-2xl">
+                        <div className="flex items-center gap-2 px-3 mr-1">
+                            <Calendar size={16} className="text-indigo-500" />
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest hidden sm:inline">조회 기간</span>
+                        </div>
+                        <PremiumDatePicker value={startDate} onChange={setStartDate} />
+                        <span className="text-slate-700 px-1">~</span>
+                        <PremiumDatePicker value={endDate} onChange={setEndDate} />
                     </div>
                 </div>
             </div>

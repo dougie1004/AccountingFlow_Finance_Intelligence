@@ -127,11 +127,102 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
     const VARIABLE_COST_PER_USER = resolveVariableCost(cfg);
 
     let prevMonthRev = 0;
+    
+    // [V2.9] Accrual Settlement Tracking
+    let pendingCollectionAR = 0;
+    let pendingRentAP = 0;
+    let pendingMarketingAP = 0;
+    let pendingCogsAP = 0;
 
     years.forEach(year => {
         for (let month = 1; month <= 12; month++) {
             const dateStr = `${year}-${String(month).padStart(2, '0')}-28`;
+            const settlementDate = `${year}-${String(month).padStart(2, '0')}-05`; // Settle early in the month
             const currentDate = new Date(dateStr);
+
+            // --- PHASE 1: SETTLEMENT OF PREVIOUS MONTH ---
+            
+            // 1. Collect AR (Revenue from last month)
+            if (pendingCollectionAR > 0) {
+                ledger.push({
+                    id: `AR-COLLECT-${year}-${month}`,
+                    date: settlementDate,
+                    description: `[SETTLE] 전월 매출 대금 회수 완료 (카드/PG 정산)`,
+                    vendor: 'Payment Gateway',
+                    debitAccount: '보통예금',
+                    debitAccountId: 'acc_103',
+                    creditAccount: '외상매출금',
+                    creditAccountId: 'acc_108',
+                    amount: pendingCollectionAR,
+                    vat: 0,
+                    type: 'Revenue',
+                    status: 'Approved'
+                });
+                currentCash += pendingCollectionAR;
+                pendingCollectionAR = 0;
+            }
+
+            // 2. Pay Rent (from last month)
+            if (pendingRentAP > 0) {
+                ledger.push({
+                    id: `RENT-PAID-${year}-${month}`,
+                    date: settlementDate,
+                    description: `[SETTLE] 전월 임차료 및 부가세 지급 완료`,
+                    vendor: 'Bldg Management',
+                    debitAccount: '미지급금',
+                    debitAccountId: 'acc_253',
+                    creditAccount: '보통예금',
+                    creditAccountId: 'acc_103',
+                    amount: pendingRentAP,
+                    vat: 0,
+                    type: 'Expense',
+                    status: 'Approved'
+                });
+                currentCash -= pendingRentAP;
+                pendingRentAP = 0;
+            }
+
+            // 3. Pay Marketing (from last month)
+            if (pendingMarketingAP > 0) {
+                ledger.push({
+                    id: `MKT-PAID-${year}-${month}`,
+                    date: settlementDate,
+                    description: `[SETTLE] 전월 마케팅 집행 대금 결제 (Google/Meta)`,
+                    vendor: 'Ad Agency',
+                    debitAccount: '미지급금',
+                    debitAccountId: 'acc_253',
+                    creditAccount: '보통예금',
+                    creditAccountId: 'acc_103',
+                    amount: pendingMarketingAP,
+                    vat: 0,
+                    type: 'Expense',
+                    status: 'Approved'
+                });
+                currentCash -= pendingMarketingAP;
+                pendingMarketingAP = 0;
+            }
+
+            // 4. Pay COGS (from last month)
+            if (pendingCogsAP > 0) {
+                ledger.push({
+                    id: `COGS-PAID-${year}-${month}`,
+                    date: settlementDate,
+                    description: `[SETTLE] 전월 인프라/API 사용료 결제 (AWS/OpenAI)`,
+                    vendor: 'Infra Provider',
+                    debitAccount: '미지급금',
+                    debitAccountId: 'acc_253',
+                    creditAccount: '보통예금',
+                    creditAccountId: 'acc_103',
+                    amount: pendingCogsAP,
+                    vat: 0,
+                    type: 'Expense',
+                    status: 'Approved'
+                });
+                currentCash -= pendingCogsAP;
+                pendingCogsAP = 0;
+            }
+
+            // --- PHASE 2: CURRENT MONTH RECOGNITION ---
 
             const isTargetMonth = year === 2026 && month === 5;
             if (isTargetMonth) {
@@ -151,6 +242,26 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                 });
                 addPartner('대표자/창업팀', 'Vendor');
                 currentCash += cfg.initialCapital;
+
+                // [ASSET] Initial Equipment Acquisition (to trigger depreciation logic)
+                const workstationCost = 5000000;
+                const workstationVat = 500000;
+                addAsset('워크스테이션', workstationCost, `${year}-05-02`, '비품');
+                ledger.push({
+                    id: `INIT-ASSET-${year}-${month}`,
+                    date: `${year}-05-02`,
+                    description: '[ASSET] 초기 서버급 워크스테이션 도입',
+                    vendor: '델 테크놀로지스',
+                    debitAccount: '비품',
+                    debitAccountId: 'acc_212',
+                    creditAccount: '보통예금',
+                    creditAccountId: 'acc_103',
+                    amount: workstationCost,
+                    vat: workstationVat,
+                    type: 'Asset',
+                    status: 'Approved'
+                });
+                currentCash -= (workstationCost + workstationVat);
             }
 
             const isOperating = year > 2026 || (year === 2026 && month >= 5);
@@ -196,39 +307,25 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
             const isGrantPhase2 = year === 2026 && month === 10 && cfg.hasGrant; // 2nd Tranche
 
             if (isGrantPhase1 || isGrantPhase2) {
+                // 1. Unified Voucher Entry (DR Expense + DR VAT / CR Grant + CR Bank)
                 const grantTranche = 20000000; // 20M per phase
                 const vatAmt = Math.floor(grantTranche * 0.1);
 
-                // 1. Grant Revenue (Credit)
                 ledger.push({
-                    id: `GRANT-REV-${year}-${month}`,
+                    id: `GRANT-VOUCHER-${year}-${month}`,
                     date: dateStr,
-                    description: `[VOUCHER] 정부보조금 바우처 집행 (${month}월분)`,
-                    vendor: '한국디지털진흥원',
-                    debitAccount: '지급수수료', // Standardizing from '서비스이용료(바우처)'
-                    debitAccountId: 'acc_811',
-                    creditAccount: '정부보조금수익',
-                    creditAccountId: 'acc_403',
-                    amount: grantTranche,
-                    vat: 0,
-                    type: 'Revenue',
-                    status: 'Approved'
-                });
-
-                // 2. VAT Outflow (Only tax paid by company cash)
-                ledger.push({
-                    id: `GRANT-VAT-${year}-${month}`,
-                    date: dateStr,
-                    description: `[VOUCHER] 정부보조금 집행분 부가세 자부담`,
+                    description: `[VOUCHER] 정부보조금 바우처 집행 및 부가세 자부담`,
                     vendor: '서비스 파트너사',
-                    debitAccount: '부가세대급금',
-                    debitAccountId: 'acc_135',
-                    creditAccount: '보통예금',
-                    creditAccountId: 'acc_103',
-                    amount: vatAmt,
-                    vat: 0,
-                    type: 'Expense',
-                    status: 'Approved'
+                    amount: grantTranche,
+                    vat: 0, // Manual complex lines
+                    type: 'Revenue',
+                    status: 'Approved',
+                    complexLines: [
+                        { account: '지급수수료', accountId: 'acc_825', debit: grantTranche, credit: 0 }, // Expense
+                        { account: '부가세대급금', accountId: 'acc_135', debit: vatAmt, credit: 0 }, // Input VAT
+                        { account: '정부보조금수익', accountId: 'acc_403', debit: 0, credit: grantTranche }, // Revenue
+                        { account: '보통예금', accountId: 'acc_103', debit: 0, credit: vatAmt } // Cash Outflow for VAT
+                    ]
                 });
                 currentCash -= vatAmt;
             }
@@ -259,7 +356,6 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                const reinvestRatio = cfg.growthStrategy?.reinvestRatio || 0;
                effectiveMkt = activeMkt + (prevMonthRev * reinvestRatio);
                
-               // [NEW V2] Dynamic growth calculation via Engine
                const userState = updateUsers(currentUsers, effectiveMkt, cfg.userModel);
                currentUsers = userState.users;
             }
@@ -270,89 +366,56 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
             if (revenueActive) {
                 currentARPU = resolveARPU(currentDate, cfg);
                 monthlyRev = currentUsers * currentARPU;
-                const totalRevWithVat = monthlyRev + Math.floor(monthlyRev * 0.1);
+                const vatAmount = Math.floor(monthlyRev * 0.1);
+                const totalRevWithVat = monthlyRev + vatAmount;
                 
                 // [Accrual] 1. Revenue Recognition (Debit AR)
                 const invoiceId = `REV-AR-${year}-${month}`;
                 ledger.push({
                     id: invoiceId,
                     date: dateStr,
-                    description: `[SaaS] 구독매출 채권 인식 (유저: ${currentUsers}명)`,
+                    description: `[SaaS] 구독매출 인식 (유저: ${currentUsers}명)`,
                     vendor: 'Global Customers',
                     debitAccount: '외상매출금',
                     debitAccountId: 'acc_108',
                     creditAccount: '상품매출',
                     creditAccountId: 'acc_401',
                     amount: monthlyRev,
-                    vat: Math.floor(monthlyRev * 0.1),
+                    vat: vatAmount,
                     type: 'Revenue',
                     status: 'Approved',
                     accountType: 'AR',
                     referenceId: invoiceId
                 });
 
-                // [Accrual] 2. Collection (85% Collection Rate)
-                const collectedAmt = Math.floor(totalRevWithVat * 0.85);
-                if (collectedAmt > 0) {
-                    ledger.push({
-                        id: `REV-COL-${year}-${month}`,
-                        date: dateStr,
-                        description: `[SETTLE] 매출 대금 회수 (회수율 85% 완료)`,
-                        vendor: 'Payment Gateway',
-                        debitAccount: '보통예금',
-                        debitAccountId: 'acc_103',
-                        creditAccount: '외상매출금',
-                        creditAccountId: 'acc_108',
-                        amount: collectedAmt,
-                        vat: 0,
-                        type: 'Revenue',
-                        status: 'Approved',
-                        accountType: 'AR',
-                        referenceId: invoiceId // Match with Revenue ID
-                    });
-                    currentCash += collectedAmt;
-                }
+                // Store for settlement in M+1
+                pendingCollectionAR = totalRevWithVat;
 
                 const vCost = currentUsers * VARIABLE_COST_PER_USER;
-                const totalCostWithVat = vCost + Math.floor(vCost * 0.1);
+                const vVat = Math.floor(vCost * 0.1);
+                const totalCostWithVat = vCost + vVat;
 
-                // [Accrual] 3. Expense Recognition (Credit AP)
+                // [Accrual] 2. Expense Recognition (Credit AP)
                 const cogsId = `COGS-AP-${year}-${month}`;
                 ledger.push({
                     id: cogsId,
                     date: dateStr,
-                    description: '[COGS] AI API 비용 청구 (미지급)',
+                    description: '[COGS] AI 인프라 사용료 (미지급)',
                     vendor: 'AWS/OpenAI',
                     debitAccount: '상품매출원가',
                     debitAccountId: 'acc_501',
                     creditAccount: '미지급금',
                     creditAccountId: 'acc_253',
                     amount: vCost,
-                    vat: Math.floor(vCost * 0.1),
+                    vat: vVat,
                     type: 'Expense',
                     status: 'Approved',
                     accountType: 'AP',
                     referenceId: cogsId
                 });
 
-                // [Accrual] 4. COGS Payment (Immediate for Cloud)
-                ledger.push({
-                    id: `COGS-PAY-${year}-${month}`,
-                    date: dateStr,
-                    description: '[SETTLE] AI API 비용 결제 완료',
-                    vendor: 'AWS/OpenAI',
-                    debitAccount: '미지급금',
-                    debitAccountId: 'acc_253',
-                    creditAccount: '보통예금',
-                    creditAccountId: 'acc_103',
-                    amount: totalCostWithVat,
-                    vat: 0,
-                    type: 'Expense',
-                    status: 'Approved',
-                    accountType: 'AP',
-                    referenceId: cogsId
-                });
-                currentCash -= totalCostWithVat;
+                // Store for settlement in M+1
+                pendingCogsAP = totalCostWithVat;
             }
 
             if (isOperating) {
@@ -360,34 +423,90 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                 const activePayroll = Math.floor(cfg.fixedCosts.payroll * Math.pow(1 + cfg.annualWageGrowth, elapsedYears));
                 const activeRent = cfg.fixedCosts.rent;
 
-                // [Accrual] Payroll is immediate for sim
-                ledger.push({ id: `PAY-${year}-${month}`, date: dateStr, description: `[PAY] 정기 인건비`, vendor: 'Staff', debitAccount: '급여', debitAccountId: 'acc_801', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: activePayroll, vat: 0, type: 'Payroll', status: 'Approved' });
+                // Payroll remains immediate as per business standard
+                ledger.push({ id: `PAY-${year}-${month}`, date: dateStr, description: `[PAY] 당월 급여 지급`, vendor: 'Staff', debitAccount: '급여', debitAccountId: 'acc_801', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: activePayroll, vat: 0, type: 'Payroll', status: 'Approved' });
                 currentCash -= activePayroll;
 
                 const overheadAmt = Math.floor(activePayroll * 0.183);
-                ledger.push({ id: `OH-${year}-${month}`, date: dateStr, description: `[EXP] 인건비 부대비용`, vendor: 'Staff Overhead', debitAccount: '세금과공과', debitAccountId: 'acc_817', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: overheadAmt, vat: 0, type: 'Expense', status: 'Approved' });
+                ledger.push({ id: `OH-${year}-${month}`, date: dateStr, description: `[EXP] 4대보험 및 제세공과금`, vendor: 'Staff Overhead', debitAccount: '세금과공과', debitAccountId: 'acc_815', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: overheadAmt, vat: 0, type: 'Expense', status: 'Approved' });
                 currentCash -= overheadAmt;
                 
-                if (activeRent > 0) {
-                    const totalRent = activeRent + Math.floor(activeRent * 0.1);
-                    const rentId = `RENT-AP-${year}-${month}`;
-                    // [Accrual] Rent via AP (90% payment simulation)
-                    ledger.push({ id: rentId, date: dateStr, description: `[RENT] 공간 임차료 청구`, vendor: 'Bldg', debitAccount: '임차료', debitAccountId: 'acc_816', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: activeRent, vat: Math.floor(activeRent * 0.1), type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: rentId });
+                // [DEPRECIATION] Monthly entry for assets
+                if (assets.length > 0) {
+                    let totalDep = 0;
+                    assets.forEach(a => {
+                        const monthlyDep = Math.floor(a.cost / (a.usefulLife * 12));
+                        totalDep += monthlyDep;
+                    });
                     
-                    const payRent = Math.floor(totalRent * 0.9);
-                    ledger.push({ id: `RENT-PAY-${year}-${month}`, date: dateStr, description: `[SETTLE] 임차료 결제 (90%)`, vendor: 'Bldg', debitAccount: '미지급금', debitAccountId: 'acc_253', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: payRent, vat: 0, type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: rentId });
-                    currentCash -= payRent;
+                    if (totalDep > 0) {
+                        ledger.push({
+                            id: `DEP-${year}-${month}`,
+                            date: dateStr,
+                            description: '[EXP] 당월 비유동자산 감가상각 인식',
+                            vendor: 'Internal',
+                            debitAccount: '감가상각비',
+                            debitAccountId: 'acc_831',
+                            creditAccount: '감가상각누계액',
+                            creditAccountId: 'acc_213',
+                            amount: totalDep,
+                            vat: 0,
+                            type: 'Expense',
+                            status: 'Approved'
+                        });
+                    }
+                }
+
+                if (activeRent > 0) {
+                    const rVat = Math.floor(activeRent * 0.1);
+                    const totalRentWithVat = activeRent + rVat;
+                    const rentId = `RENT-AP-${year}-${month}`;
+                    
+                    // Recognition
+                    ledger.push({ id: rentId, date: dateStr, description: `[RENT] 사무실 임차료 청구`, vendor: 'Bldg', debitAccount: '임차료', debitAccountId: 'acc_816', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: activeRent, vat: rVat, type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: rentId });
+                    
+                    // Store for M+1
+                    pendingRentAP = totalRentWithVat;
                 }
                 
                 if (effectiveMkt > 0) {
-                    const totalMkt = effectiveMkt + Math.floor(effectiveMkt * 0.1);
+                    const mVat = Math.floor(effectiveMkt * 0.1);
+                    const totalMktWithVat = effectiveMkt + mVat;
                     const mktId = `MKT-AP-${year}-${month}`;
-                    // [Accrual] Marketing via AP (Legacy "Risk Exposure" simulation)
-                    ledger.push({ id: mktId, date: dateStr, description: `[MKT] 마케팅비 청구`, vendor: 'Google/FB', debitAccount: '광고선전비', debitAccountId: 'acc_826', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: effectiveMkt, vat: Math.floor(effectiveMkt * 0.1), type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });
                     
-                    const payMkt = Math.floor(totalMkt * 0.8); // 80% payment only to leave debt
-                    ledger.push({ id: `MKT-PAY-${year}-${month}`, date: dateStr, description: `[SETTLE] 마케팅비 결제 (80% 우선집행)`, vendor: 'Google/FB', debitAccount: '미지급금', debitAccountId: 'acc_253', creditAccount: '보통예금', creditAccountId: 'acc_103', amount: payMkt, vat: 0, type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });
-                    currentCash -= payMkt;
+                    // Recognition
+                    ledger.push({ id: mktId, date: dateStr, description: `[MKT] 마케팅 광고 집행비 인식`, vendor: 'Ad Partners', debitAccount: '광고선전비', debitAccountId: 'acc_826', creditAccount: '미지급금', creditAccountId: 'acc_253', amount: effectiveMkt, vat: mVat, type: 'Expense', status: 'Approved', accountType: 'AP', referenceId: mktId });
+                    
+                    // Store for M+1
+                    pendingMarketingAP = totalMktWithVat;
+                }
+
+                // [VAT SETTLEMENT] Quarterly (Jan, Apr, Jul, Oct 25th)
+                const isVatMonth = [1, 4, 7, 10].includes(month);
+                if (isVatMonth) {
+                    // Simplifying for simulation: Move Net VAT to Cash
+                    // In real scenario, it should analyze previous quarter's VAT accounts
+                    // Here we just simulate a chunk based on revenue
+                    const vatSettlementDate = `${year}-${String(month).padStart(2, '0')}-25`;
+                    const estimatedVatPayment = Math.floor((monthlyRev - (effectiveMkt + (currentUsers * VARIABLE_COST_PER_USER))) * 0.1);
+                    
+                    if (estimatedVatPayment > 0) {
+                        ledger.push({
+                            id: `VAT-FILING-${year}-${month}`,
+                            date: vatSettlementDate,
+                            description: `[TAX] 분기 부가세 정산 납부`,
+                            vendor: 'National Tax Service',
+                            debitAccount: '부가세예수금',
+                            debitAccountId: 'acc_257',
+                            creditAccount: '보통예금',
+                            creditAccountId: 'acc_103',
+                            amount: estimatedVatPayment,
+                            vat: 0,
+                            type: 'Expense',
+                            status: 'Approved'
+                        });
+                        currentCash -= estimatedVatPayment;
+                    }
                 }
             }
 

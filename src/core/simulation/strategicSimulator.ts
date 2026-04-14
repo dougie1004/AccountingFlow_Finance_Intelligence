@@ -122,17 +122,59 @@ export function projectScenarioFrontend(
 
     const futureEntries: JournalEntry[] = [];
     
+    // [V2.5] High-Fidelity Accrual Settlement Tracking
+    let pendingAR = 0;
+    let pendingAP = 0;
+
     // 2. Project Months
     const anchor = new Date(selectedDate);
     const startYear = anchor.getFullYear();
     const startMonth = anchor.getMonth();
 
     for (let i = 1; i <= months; i++) {
-        const currentProjectionDate = new Date(startYear, startMonth + i, 28);
-        const dateStr = currentProjectionDate.toISOString().split('T')[0];
+        // Recognition on 28th, Settlement on 5th of NEXT month
+        const dateStr = new Date(startYear, startMonth + i, 28).toISOString().split('T')[0];
+        const nextMonthSettlementDate = new Date(startYear, startMonth + i + 1, 5).toISOString().split('T')[0];
         
-        // 🔥 [ALIGNMENT] t = 0 starts at i = 1 (Jan 2029) to match Anchor exactly.
-        // Growth and Inflation indices apply from i = 2 onwards.
+        // --- PHASE 1: SETTLEMENT OF PREVIOUS MONTH (Actual Cash Flow) ---
+        const settlementDate = new Date(startYear, startMonth + i, 5).toISOString().split('T')[0];
+        
+        if (pendingAR > 0) {
+            futureEntries.push({
+                id: `FUTURE-SETTLE-AR-${settlementDate}-${i}`,
+                date: settlementDate,
+                description: `[SETTLE] Projected Revenue Collection (M+1)`,
+                amount: Math.round(pendingAR),
+                vat: 0,
+                debitAccount: "보통예금",
+                debitAccountId: "acc_103",
+                creditAccount: "외상매출금",
+                creditAccountId: "acc_108",
+                type: "Revenue",
+                scope: "future",
+                status: "Approved"
+            });
+            pendingAR = 0;
+        }
+
+        if (pendingAP > 0) {
+            futureEntries.push({
+                id: `FUTURE-SETTLE-AP-${settlementDate}-${i}`,
+                date: settlementDate,
+                description: `[SETTLE] Projected Expense Payment (M+1)`,
+                amount: Math.round(pendingAP),
+                vat: 0,
+                debitAccount: "미지급금",
+                debitAccountId: "acc_253",
+                creditAccount: "보통예금",
+                creditAccountId: "acc_103",
+                type: "Scenario",
+                scope: "future",
+                status: "Approved"
+            });
+            pendingAP = 0;
+        }
+
         const yearOffset = (i - 1) / 12;
 
         const growthIdx = Math.pow(1 + (macro.revenueNaturalGrowth || 0), yearOffset);
@@ -143,44 +185,37 @@ export function projectScenarioFrontend(
         const adjustedPayroll = baseAvgPayroll * strategy.expenseMult * wageIdx;
         const adjustedOpex = (baseAvgOpex * strategy.expenseMult * inflationIdx) + strategy.fixedCostDelta;
 
-        // ✅ Step 2. 매출 생성 로직 로그 (첫 달만 출력)
         if (i === 1) {
-            console.log('[SIM_REVENUE]', {
-                baseAvgRevenue,
-                revenueMult: strategy.revenueMult,
-                growthIdx,
-                finalRevenue: adjustedRevenue
-            });
-            console.log('[SIM_EXPENSE]', {
-                baseAvgOpex,
-                expenseMult: strategy.expenseMult,
-                inflationIdx,
-                finalExpense: adjustedOpex
-            });
+            console.log('[DEBUG_SIM] Month 1:', { dateStr, adjustedRevenue, pendingAR });
         }
 
-        // Revenue Entry (Now CASH for better simulation clarity)
-        futureEntries.push({
-            id: `FUTURE-REV-${dateStr}-${i}`,
-            date: dateStr,
-            description: `[FUTURE] Projected Revenue (Growth: ${((macro.revenueNaturalGrowth||0)*100).toFixed(1)}%)`,
-            amount: Math.round(adjustedRevenue),
-            vat: 0,
-            debitAccount: "보통예금", // [FIX] A/R -> CASH
-            debitAccountId: "acc_103",
-            creditAccount: "상품매출",
-            creditAccountId: "acc_401",
-            type: "Revenue", // [V12] Fix: Enable Burn Multiple tracking
-            scope: "future",
-            status: "Approved"
-        });
 
-        // Payroll Entry (CASH)
+        // Revenue Recognition (Accounts Receivable)
+        if (adjustedRevenue > 0) {
+            futureEntries.push({
+                id: `FUTURE-REV-${dateStr}-${i}`,
+                date: dateStr,
+                description: `[FUTURE] Projected Revenue (Accrual Recognition)`,
+                amount: Math.round(adjustedRevenue),
+                vat: 0,
+                debitAccount: "외상매출금",
+                debitAccountId: "acc_108",
+                creditAccount: "상품매출",
+                creditAccountId: "acc_401",
+                type: "Revenue",
+                scope: "future",
+                status: "Approved"
+            });
+            pendingAR = adjustedRevenue; 
+        }
+
+        // Payroll Entry (Usually Cash, but we can treat as immediate for simplification if needed, or M+1)
+        // keeping it immediate to reflect standard startup payroll practice (25th or last day payout)
         if (adjustedPayroll > 0) {
             futureEntries.push({
                 id: `FUTURE-PAY-${dateStr}-${i}`,
                 date: dateStr,
-                description: `[FUTURE] Projected Payroll (Wage Growth: ${((macro.wageGrowthRate||0)*100).toFixed(1)}%)`,
+                description: `[FUTURE] Projected Payroll`,
                 amount: Math.round(adjustedPayroll),
                 vat: 0,
                 debitAccount: "급여",
@@ -198,7 +233,7 @@ export function projectScenarioFrontend(
             futureEntries.push({
                 id: `FUTURE-OPEX-${dateStr}-${i}`,
                 date: dateStr,
-                description: `[FUTURE] Projected Opex (Inflation: ${((macro.inflationRate||0)*100).toFixed(1)}%)`,
+                description: `[FUTURE] Projected Opex (Accrual Recognition)`,
                 amount: Math.round(adjustedOpex),
                 vat: 0,
                 debitAccount: "상품매출원가",
@@ -209,22 +244,7 @@ export function projectScenarioFrontend(
                 scope: "future",
                 status: "Approved"
             });
-            
-            // Simulating CASH Payment for Opex within 1 month for strategic view
-            futureEntries.push({
-                id: `FUTURE-OPEX-PAY-${dateStr}-${i}`,
-                date: dateStr,
-                description: `[FUTURE] Opex Payment (Cash)`,
-                amount: Math.round(adjustedOpex),
-                vat: 0,
-                debitAccount: "미지급금",
-                debitAccountId: "acc_253",
-                creditAccount: "보통예금",
-                creditAccountId: "acc_103",
-                type: "Scenario",
-                scope: "future",
-                status: "Approved"
-            });
+            pendingAP = adjustedOpex;
         }
     }
 

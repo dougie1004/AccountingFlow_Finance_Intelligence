@@ -57,6 +57,11 @@ export interface AccountingContextType {
     allLinesLedger: LedgerLine[];
     companyKnowledge: string;
     updateCompanyKnowledge: (knowledge: string) => void;
+    // [V2.9] Ledger Date Persistence
+    ledgerStartDate: string;
+    setLedgerStartDate: (date: string) => void;
+    ledgerEndDate: string;
+    setLedgerEndDate: (date: string) => void;
     // [V2.6] Session Persistence for Metrics & Scenarios
     baselineSnapshot: { date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null;
     setBaselineSnapshot: (snapshot: any) => void;
@@ -150,6 +155,20 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         return localStorage.getItem('accounting_company_knowledge') || 
                "표준 회계 정책: 모든 지출은 적격증빙을 지향하며, 접대비는 한도를 준수함. 계약서에 명시되지 않은 비용은 집행 전 CFO 승인을 득해야 함.";
     });
+
+    // [V2.9] Ledger Date Persistence
+    const [ledgerStartDate, setLedgerStartDateState] = useState<string>(() => localStorage.getItem('ledger_start_date') || '');
+    const [ledgerEndDate, setLedgerEndDateState] = useState<string>(() => localStorage.getItem('ledger_end_date') || '');
+
+    const setLedgerStartDate = (val: string) => {
+        setLedgerStartDateState(val);
+        localStorage.setItem('ledger_start_date', val);
+    };
+
+    const setLedgerEndDate = (val: string) => {
+        setLedgerEndDateState(val);
+        localStorage.setItem('ledger_end_date', val);
+    };
 
     // [V2.6] Session Persistence (SURVIVES TAB NAVIGATION & REFRESH)
     const [baselineSnapshot, setBaselineSnapshotState] = useState<{ date: string; hash: string; ledger: JournalEntry[]; macro?: MacroAssumptions } | null>(() => {
@@ -991,6 +1010,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             allLinesLedger,
             companyKnowledge,
             updateCompanyKnowledge,
+            ledgerStartDate,
+            setLedgerStartDate,
+            ledgerEndDate,
+            setLedgerEndDate,
             baselineSnapshot,
             setBaselineSnapshot,
             scenarioResults,
