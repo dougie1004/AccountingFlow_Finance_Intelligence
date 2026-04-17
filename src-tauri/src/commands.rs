@@ -806,9 +806,10 @@ pub async fn train_knowledge_from_file(
     match result {
         Ok(res) => Ok(res),
         Err(e) => {
-            crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 10);
+            crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 5);
             Err(e)
         }
+
     }
 }
 

@@ -62,6 +62,12 @@ export interface JournalEntry {
 
     // [Edge Case] Multi-line (Complex) Entry
     complexLines?: { account: string; accountId?: string; debit: number; credit: number }[];
+
+    // [CFO Architecture] Card Installments & Benefits
+    installmentPeriod?: number;
+    installmentSeq?: number;
+    benefitAmount?: number;
+    billableAmount?: number;
 }
 
 export interface LedgerLine {
@@ -289,6 +295,9 @@ export interface Partner {
     bankName?: string;
     status: 'Approved' | 'Pending';
     tags?: string[];
+    defaultDebitAccount?: string; // AI Learning: User's preferred expense account
+    defaultCreditAccount?: string; // AI Learning: User's preferred payment account
+}
 }
 
 export type ParseStatus = 'ok' | 'warning' | 'needConfirm' | 'error';
@@ -355,6 +364,12 @@ export interface ParsedTransaction {
     residualValue?: number;
     leaseAssetType?: 'Vehicle' | 'Machinery';
     payrollSplit?: { pension: number; health: number; tax: number; net: number };
+
+    // [CFO Architecture] Card Installments & Benefits
+    installmentPeriod?: number;
+    installmentSeq?: number;
+    benefitAmount?: number;
+    billableAmount?: number;
 }
 
 export interface ComplianceReview {

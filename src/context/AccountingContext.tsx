@@ -94,6 +94,7 @@ export interface AccountingContextType {
     clearAiMessages: () => void;
     quotaStatus: { daily_units: number, monthly_units: number, total_cost_usd: number } | null;
     refreshQuota: () => Promise<void>;
+    bridgeCardPayments: (txs: ParsedTransaction[]) => ParsedTransaction[];
 }
 
 
@@ -222,10 +223,43 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         const saved = localStorage.getItem('accounting_scm_orders');
         return saved ? JSON.parse(saved) : [];
     });
-    const [stagingTransactions, setStagingTransactions] = useState<ParsedTransaction[]>(() => {
+    const [stagingTransactions, setStagingTransactionsState] = useState<ParsedTransaction[]>(() => {
         const saved = localStorage.getItem('accounting_staging_txs');
         return saved ? JSON.parse(saved) : [];
     });
+
+    const bridgeCardPayments = useCallback((txs: ParsedTransaction[]) => {
+        const brands = ['하나카드', '삼성카드', '신한카드', '현대카드', '국민카드', '우리카드'];
+        return txs.map(tx => {
+            const isTransfer = tx.paymentMethod === 'Transfer' || tx.creditAccount === '보통예금';
+            
+            // [CFO Strategy] Memory Lookup - Overwrite with user's specific learning
+            const knownPartner = partners.find(p => p.name === tx.vendor);
+            let resultTx = { ...tx };
+
+            if (knownPartner?.defaultDebitAccount && !tx.isJournalMode) {
+                resultTx.debitAccount = knownPartner.defaultDebitAccount;
+                resultTx.reasoning = `[학습된 지능] 과거 '${tx.vendor}' 거래 시 대표님이 지정하신 '${knownPartner.defaultDebitAccount}' 계정을 자동으로 적용했습니다.`;
+                resultTx.auditTrail = [...(tx.auditTrail || []), `[Learning Engine] Recalled preference for ${tx.vendor}`];
+            }
+
+            if (isTransfer) {
+                const detectedBrand = brands.find(b => tx.description.includes(b) || (tx.vendor && tx.vendor.includes(b)));
+                if (detectedBrand) {
+                    resultTx.debitAccount = `미지급금(${detectedBrand})`;
+                    resultTx.entryType = 'Liability' as any;
+                    resultTx.reasoning = `[스마트 브릿지] 금융 기록에서 '${detectedBrand}' 결제 인출이 감지되었습니다. 해당 카드사의 미지급금 계정으로 상계합니다.`;
+                }
+            }
+            return resultTx;
+        });
+    }, [partners]);
+
+    const setStagingTransactions = (val: ParsedTransaction[]) => {
+        const processed = bridgeCardPayments(val);
+        setStagingTransactionsState(processed);
+        localStorage.setItem('accounting_staging_txs', JSON.stringify(processed));
+    };
     const [finalizedMonths, setFinalizedMonths] = useState<Record<string, 'soft' | 'hard'>>(() => {
         const saved = localStorage.getItem('accounting_finalized_months');
         return saved ? JSON.parse(saved) : {};
@@ -566,15 +600,26 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         }
         setLedger(prev => prev.map(e => {
             if (e.id === id && e.status !== 'Approved') {
-                // [AUTO-REGISTRATION] Detect New Partners
-                if (e.vendor && e.vendor !== '-' && !partners.some(p => p.name === e.vendor)) {
-                    addPartner({
-                        id: `partner_${Date.now()}`,
-                        name: e.vendor,
-                        partnerType: e.type === 'Revenue' ? 'Customer' : 'Vendor',
-                        status: 'Pending',
-                        tags: ['Auto-Registered']
-                    });
+                // [AUTO-LEARNING] Update or Register Partner with Preference
+                if (e.vendor && e.vendor !== '-') {
+                    const existingPartner = partners.find(p => p.name === e.vendor);
+                    if (existingPartner) {
+                        setPartners(prevP => prevP.map(p => 
+                            p.id === existingPartner.id 
+                            ? { ...p, defaultDebitAccount: e.debitAccount, defaultCreditAccount: e.creditAccount }
+                            : p
+                        ));
+                    } else {
+                        addPartner({
+                            id: `partner_${Date.now()}`,
+                            name: e.vendor,
+                            partnerType: e.type === 'Revenue' ? 'Customer' : 'Vendor',
+                            status: 'Approved',
+                            defaultDebitAccount: e.debitAccount,
+                            defaultCreditAccount: e.creditAccount,
+                            tags: ['Self-Learned']
+                        });
+                    }
                 }
 
                 // [AUTO-REGISTRATION] Detect New Assets (ONLY for verified Fixed Asset accounts)
@@ -965,7 +1010,12 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         console.log("[AccountingContext] loadSimulation called with:", result);
         if (result.ledger) {
             console.log("[AccountingContext] Ledger found in result, count:", result.ledger.length);
-            setLedger(result.ledger.map(e => ({ ...e, status: e.status || 'Approved' })));
+            setLedger(result.ledger.map(e => ({ 
+                ...e, 
+                status: e.status || 'Approved',
+                debitAccount: e.debitAccount || '',
+                creditAccount: e.creditAccount || ''
+            })));
         } else {
             console.warn("[AccountingContext] No ledger found in simulation result! Check field naming.");
         }

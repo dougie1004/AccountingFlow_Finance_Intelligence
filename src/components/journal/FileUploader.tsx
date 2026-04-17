@@ -15,7 +15,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
     const [isUploading, setIsUploading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [mapperOpen, setMapperOpen] = useState(false);
-    const [pendingFile, setPendingFile] = useState<{ bytes: number[], name: string, headers: string[], initialMapping: Record<string, string> } | null>(null);
+    const [uploadQueue, setUploadQueue] = useState<{ bytes: number[], name: string, headers: string[], initialMapping: Record<string, string> }[]>([]);
     const [isMappingProgress, setIsMappingProgress] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
     const { config, refreshQuota } = useAccounting();
@@ -27,6 +27,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
         setIsUploading(true);
         setError(null);
         let allParsed: ParsedTransaction[] = [];
+        let structuredQueue: any[] = [];
 
         try {
             for (const file of files) {
@@ -43,11 +44,8 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                         });
                         const initialMapping = await invoke<Record<string, string>>('suggest_file_mapping', { headers });
 
-                        // For structured files, we currently only support one at a time via mapper
-                        setPendingFile({ bytes: Array.from(bytes), name: file.name, headers, initialMapping });
-                        setMapperOpen(true);
-                        setIsUploading(false); // Stop generic spinner, wait for mapper
-                        return;
+                        structuredQueue.push({ bytes: Array.from(bytes), name: file.name, headers, initialMapping });
+                        continue; // Process next file in loop
                     } catch (err) {
                         console.warn("Structured parsing failed, falling back to AI:", err);
                     }
@@ -61,10 +59,8 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                     tier: config.tier || "Free"
                 });
 
-
-
                 if (results && results.length > 0) {
-                    // 1. Image Preview Logic
+                    // ... same image preview and validation logic ...
                     const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
                     if (isImage) {
                         const blob = new Blob([bytes], { type: file.type });
@@ -74,91 +70,74 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
                         });
                     }
 
-                    // 2. Validation Logic (Filter out non-transaction documents)
-                    // We define a valid transaction as having an amount > 1 (to ignore garbage or tiny values)
-                    // and some description.
                     const validResults = results.filter(r => Number(r.amount) > 1);
                     const invalidCount = results.length - validResults.length;
 
                     if (invalidCount > 0) {
-                        const sampleInvalid = results.find(r => Number(r.amount) <= 1);
-                        const textPreview = sampleInvalid?.description?.substring(0, 60) + (sampleInvalid?.description && sampleInvalid.description.length > 60 ? '...' : '');
-
-                        // We use a safe notification approach
-                        console.warn('Invalid transaction data detected and filtered:', sampleInvalid);
-
-                        window.alert(
-                            `[인공지능 보안 알림] 🛡️\n\n` +
-                            `회계 증빙이 아닌 것으로 데이터 ${invalidCount}건이 감지되어 자동 차단되었습니다.\n\n` +
-                            `내용 요약: "${textPreview || '내용 없음'}"\n\n` +
-                            `사유: 금액 정보가 없거나(0원) 일반 문서/이미지일 가능성이 큽니다.\n` +
-                            `부정확한 데이터가 장부에 섞이는 것을 방지하기 위해 해당 항목을 제외했습니다.`
-                        );
+                        console.warn('Invalid transaction data detected and filtered:', results.find(r => Number(r.amount) <= 1));
                     }
 
                     if (validResults.length > 0) {
                         const resultsWithOriginal = validResults.map(r => ({
                             ...r,
-                            originalAmount: r.amount // Set the ground truth for integrity checks
+                            originalAmount: r.amount
                         }));
                         allParsed = [...allParsed, ...resultsWithOriginal];
                     }
                 }
             }
 
-            if (allParsed.length === 0 && !mapperOpen) {
-                if (!pendingFile) {
-                    throw new Error('데이터 분석에 실패했습니다. 파일 형식을 확인하거나 데이터가 포함되어 있는지 확인해 주세요.');
-                }
-            } else if (allParsed.length > 0) {
+            if (allParsed.length > 0) {
                 onTransactionsLoaded(allParsed);
-                refreshQuota(); // Update quota indicator
+                refreshQuota();
             }
 
-
-
+            if (structuredQueue.length > 0) {
+                setUploadQueue(prev => [...prev, ...structuredQueue]);
+                setMapperOpen(true);
+            }
         } catch (err: any) {
             console.error('Upload Error:', err);
             setError(err instanceof Error ? err.message : String(err));
         } finally {
-            if (!pendingFile) {
-                setIsUploading(false);
-            }
+            setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
 
     const handleMappingConfirm = async (mapping: Record<string, string>) => {
-        if (!pendingFile) return;
+        if (uploadQueue.length === 0) return;
+        const currentFile = uploadQueue[0];
         setIsMappingProgress(true);
         try {
             const results = await invoke<ParsedTransaction[]>('process_file_with_mapping', {
-                fileBytes: pendingFile.bytes,
-                fileName: pendingFile.name,
+                fileBytes: currentFile.bytes,
+                fileName: currentFile.name,
                 mapping
             });
 
-            // [CFO Strategy] Determine if this is a Double-Entry Journal based on actual mapping
             const isDoubleEntryMapped = !!(mapping['debit_account'] && mapping['credit_account']);
 
             const finalResults = results.map(r => ({
                 ...r,
                 isJournalMode: r.isJournalMode || isDoubleEntryMapped,
-                // Mark as user-confirmed if the relevant account was explicitly mapped from the file
                 isUserConfirmed: true,
                 originalAmount: r.amount
             }));
 
             onTransactionsLoaded(finalResults);
-            setMapperOpen(false);
-            setPendingFile(null);
+            
+            // Move to next file in queue
+            const nextQueue = uploadQueue.slice(1);
+            setUploadQueue(nextQueue);
+            if (nextQueue.length === 0) {
+                setMapperOpen(false);
+            }
         } catch (err: any) {
             console.error("Mapping Error:", err);
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setIsMappingProgress(false);
-            setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
         }
     };
 
@@ -189,16 +168,18 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
 
     return (
         <div className="relative">
-            {mapperOpen && pendingFile && (
+            {mapperOpen && uploadQueue.length > 0 && (
                 <DataMapper
-                    fileName={pendingFile.name}
-                    headers={pendingFile.headers}
-                    initialMapping={pendingFile.initialMapping}
+                    fileName={uploadQueue[0].name}
+                    headers={uploadQueue[0].headers}
+                    initialMapping={uploadQueue[0].initialMapping}
                     onConfirm={handleMappingConfirm}
                     onCancel={() => {
-                        setMapperOpen(false);
-                        setPendingFile(null);
-                        setIsUploading(false);
+                        const nextQueue = uploadQueue.slice(1);
+                        setUploadQueue(nextQueue);
+                        if (nextQueue.length === 0) {
+                            setMapperOpen(false);
+                        }
                     }}
                     error={error}
                     isProcessing={isMappingProgress}

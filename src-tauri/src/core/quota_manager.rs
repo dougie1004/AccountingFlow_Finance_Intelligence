@@ -39,11 +39,13 @@ impl QuotaManager {
         }
 
         let (daily_limit, monthly_limit) = match tier {
-            "Free" => (20, 200),      // Strict limits for free tier
-            "Pro" => (500, 5000),      // Professional tier
+            "Free" => (10, 100),      // Strategically limited to drive conversion (approx 5 OCRs/day)
+            "Pro" => (500, 5000),     // Professional tier
             "Enterprise" => (5000, 50000), 
-            _ => (10, 100),            // Default minimal
+            _ => (10, 100),           // Default minimal
         };
+
+
 
         if quota.daily_units + weight > daily_limit {
             return Err(format!("Daily AI Quota exceeded. (Used: {}, Limit: {}). Please upgrade to Pro or wait until tomorrow.", quota.daily_units, daily_limit));

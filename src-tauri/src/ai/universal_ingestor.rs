@@ -121,12 +121,13 @@ pub async fn ingest_universal_file(
                     Ok(vec![ai_res])
                 },
                 Err(e) => {
-                    // Refund 5 units for Vision
-                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 5);
+                    // Refund 2 units for Vision (Adjusted from 5)
+                    crate::core::quota_manager::QUOTA_MANAGER.refund_usage(&tenant_id, 2);
                     Err(e)
                 }
             }
         }
+
         _ => Err(format!("Unsupported file format: .{}", extension)),
 
     }

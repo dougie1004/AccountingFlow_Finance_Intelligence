@@ -110,6 +110,12 @@ pub struct ParsedTransaction {
     #[serde(default = "default_ledger_scope")]
     pub scope: LedgerScope,
     pub scenario_id: Option<String>,
+
+    // [CFO Strategy] Card Deep-Dive (Installments & Benefits)
+    pub installment_period: Option<u32>,
+    pub installment_seq: Option<u32>,
+    pub benefit_amount: Option<f64>,
+    pub billable_amount: Option<f64>,
 }
 
 fn default_ledger_scope() -> LedgerScope {
@@ -159,6 +165,10 @@ pub struct JournalEntry {
     #[serde(default = "default_ledger_scope")]
     pub scope: LedgerScope,
     pub scenario_id: Option<String>,
+
+    pub installment_period: Option<u32>,
+    pub installment_seq: Option<u32>,
+    pub benefit_amount: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]

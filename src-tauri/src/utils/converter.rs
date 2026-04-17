@@ -33,8 +33,8 @@ pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
         if h_norm.contains("일자") || h_norm.contains("날짜") || h_norm.contains("date") || h_norm.contains("일시") || h_norm.contains("time") || h_norm.contains("거래일") || h_norm.contains("사용일") || h_norm.contains("승인일") || h_norm.contains("취득") {
             mapping.insert(header.clone(), "tx_date".to_string());
         } 
-        // 2. Amount (Prioritize '금액' over '결제')
-        else if h_norm.contains("금액") || h_norm.contains("합계") || h_norm.contains("amount") || h_norm.contains("price") || h_norm.contains("총액") || h_norm.contains("비용") || h_norm.contains("지출") || h_norm.contains("공급") || h_norm.contains("가격") || h_norm.contains("보험료") || h_norm.contains("산출") || h_norm.contains("납부") {
+        // 2. Amount ([Antigravity] Prioritize Principal & Billable as primary Amount)
+        else if h_norm.contains("금액") || h_norm.contains("원금") || h_norm.contains("청구") || h_norm.contains("결제원금") || h_norm.contains("billable") || h_norm.contains("합계") || h_norm.contains("amount") || h_norm.contains("price") || h_norm.contains("총액") || h_norm.contains("공급") {
             mapping.insert(header.clone(), "amount".to_string());
         }
         // 3. Vendor
@@ -45,8 +45,8 @@ pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
         else if h_norm.contains("내용") || h_norm.contains("적요") || h_norm.contains("description") || h_norm.contains("memo") || h_norm.contains("품명") || h_norm.contains("상세") || h_norm.contains("비고") || h_norm.contains("항목") {
             mapping.insert(header.clone(), "description".to_string());
         }
-        // 5. Payment Method
-        else if h_norm.contains("결제") || h_norm.contains("수단") || h_norm.contains("payment") || h_norm.contains("구분") || h_norm.contains("방식") || h_norm.contains("카드") || h_norm.contains("계좌") || h_norm.contains("승인번호") {
+        // 5. Payment Method ([Antigravity] Exclude Money keywords to prevent 'Principal' being mapped as 'Method')
+        else if (h_norm.contains("결제") || h_norm.contains("수단") || h_norm.contains("payment") || h_norm.contains("방식") || h_norm.contains("카드")) && !h_norm.contains("원금") && !h_norm.contains("금액") {
              mapping.insert(header.clone(), "payment_type".to_string());
         }
         // 6. Bank Name
@@ -85,6 +85,18 @@ pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
         else if h_norm == "type" || h_norm.contains("유형") {
             mapping.insert(header.clone(), "entry_type".to_string());
         }
+        // 13. [CFO Strategy] Card Deep-Dive (Installments & Benefits)
+        else if h_norm.contains("할부") || h_norm.contains("개월") || h_norm.contains("period") {
+             mapping.insert(header.clone(), "installment_period".to_string());
+        }
+        else if h_norm.contains("회차") || h_norm.contains("seq") {
+             mapping.insert(header.clone(), "installment_seq".to_string());
+        }
+        else if h_norm.contains("혜택") || h_norm.contains("할인") || h_norm.contains("benefit") || h_norm.contains("discount") {
+             mapping.insert(header.clone(), "benefit_amount".to_string());
+        }
+        // Moved up to prioritize correctly over payment types
+
         // Fallback for Bank Account if it contains 'account' but wasn't caught above
         else if h_norm.contains("account") {
              mapping.insert(header.clone(), "bank_account".to_string());
@@ -132,7 +144,7 @@ pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String>
         
         // [Antigravity] Smart Header Search for Excel
         let rows: Vec<Vec<String>> = range.rows()
-            .take(20) // Scan top 20 rows
+            .take(100) // [FIX] Scan top 100 rows (Corporate card statements often have deep summaries)
             .map(|row| row.iter().map(|c| deep_clean_value(&c.to_string())).collect())
             .collect();
 
@@ -155,7 +167,7 @@ pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String>
             .from_reader(decoded.as_bytes());
             
         let records: Vec<Vec<String>> = rdr.records()
-            .take(30) // Scan more rows to find buried headers
+            .take(100) // [FIX] Scan more rows to find buried headers
             .filter_map(|r| r.ok())
             .map(|r| r.iter().map(|s| deep_clean_value(s)).collect())
             .collect();
@@ -184,16 +196,17 @@ fn find_best_header_row(rows: &[Vec<String>]) -> Option<(usize, Vec<String>)> {
         let non_empty_count = row.iter().filter(|s| !s.trim().is_empty()).count();
         
         // 1. Column Search Logic (Cumulative Scoring)
-        if joined.contains("일자") || joined.contains("날짜") || joined.contains("date") || joined.contains("일시") { score += 3; }
+        if joined.contains("일자") || joined.contains("날짜") || joined.contains("date") || joined.contains("일시") || joined.contains("사용일") || joined.contains("거래일") { score += 4; }
         if joined.contains("취득") { score += 3; }
-        if joined.contains("금액") || joined.contains("합계") || joined.contains("amount") || joined.contains("원") || joined.contains("공급") { score += 3; }
+        if joined.contains("금액") || joined.contains("합계") || joined.contains("amount") || joined.contains("원") || joined.contains("공급") || joined.contains("가액") || joined.contains("공급가") { score += 4; }
         if joined.contains("산출") || joined.contains("보수") || joined.contains("보험료") || joined.contains("납부") || joined.contains("수당") || joined.contains("보수월액") { score += 3; }
-        if joined.contains("거래처") || joined.contains("상호") || joined.contains("vendor") || joined.contains("성명") || joined.contains("가입자") || joined.contains("순번") { score += 3; }
-        if joined.contains("내용") || joined.contains("적요") || joined.contains("description") || joined.contains("비고") || joined.contains("항목") { score += 2; }
-        if joined.contains("잔액") || joined.contains("balance") { score += 1; }
+        if joined.contains("거래처") || joined.contains("상호") || joined.contains("vendor") || joined.contains("성명") || joined.contains("가입자") || joined.contains("순번") || joined.contains("가맹점") || joined.contains("사용처") || joined.contains("이용처") { score += 4; }
+        if joined.contains("내용") || joined.contains("적요") || joined.contains("description") || joined.contains("비고") || joined.contains("항목") || joined.contains("승인번호") { score += 2; }
+        if joined.contains("잔액") || joined.contains("balance") || joined.contains("결제원금") || joined.contains("수수료") { score += 1; }
         
         // 2. Structural Preference
-        if non_empty_count >= 5 { score += 5; }
+        if non_empty_count >= 8 { score += 10; } // Highly likely a transaction table
+        else if non_empty_count >= 5 { score += 5; }
         else if non_empty_count >= 3 { score += 2; }
         
         // Penalize metadata rows (Title or Metadata like "Date: 123")
@@ -276,7 +289,7 @@ pub fn process_with_mapping(
         let mut col_map = HashMap::new();
         // Delay metadata extraction until we find headers
 
-        for (i, row) in rows.iter().enumerate().take(20) {
+        for (i, row) in rows.iter().enumerate().take(100) {
              let current_col_map = build_index_map(row, &mapping);
              if current_col_map.contains_key("tx_date") && current_col_map.contains_key("amount") {
                  start_idx = i + 1; 
@@ -316,7 +329,7 @@ pub fn process_with_mapping(
         let mut col_map = HashMap::new();
         // Delay metadata extraction until we find headers
 
-        for (i, row) in all_records.iter().enumerate().take(20) {
+        for (i, row) in all_records.iter().enumerate().take(100) {
              // ... (Header Search Logic - simplified for replacement)
              let mut check_row = row.clone();
              if check_row.len() == 1 {
@@ -406,6 +419,59 @@ fn build_index_map(headers: &[String], mapping: &HashMap<String, String>) -> Has
     index_map
 }
 
+/// [Antigravity] Smart Merchant-to-Account Engine
+/// Inference logic for common Korean/Global vendors to GL accounts
+fn suggest_account_from_merchant(merchant: &str) -> Option<String> {
+    let m = merchant.to_lowercase();
+    
+    // 1. Digital Service / SaaS (지급임차료 or 소프트웨어)
+    if m.contains("openai") || m.contains("chatgpt") || m.contains("anthropic") || m.contains("perplexity") || m.contains("github") || m.contains("notion") || m.contains("slack") || m.contains("zoom") || m.contains("adobe") || m.contains("jetbrains") || m.contains("figma") || m.contains("canva") || m.contains("gamma") || m.contains("linear") || m.contains("framer") || m.contains("midjourney") {
+        return Some("지급임차료(SaaS)".to_string());
+    }
+    if m.contains("gabia") || m.contains("가비아") || m.contains("cafe24") || m.contains("카페24") || m.contains("aws") || m.contains("amazon web") || m.contains("google cloud") || m.contains("gcp") || m.contains("azure") || m.contains("heroku") || m.contains("vercel") || m.contains("google storage") {
+        return Some("지급임차료(Cloud)".to_string());
+    }
+
+    // 2. Transport (여비교통비)
+    if m.contains("kakao t") || m.contains("카카오t") || m.contains("카카오택시") || m.contains("uber") || m.contains("tada") || m.contains("타다") || m.contains("taxi") || m.contains("택시") {
+        return Some("여비교통비".to_string());
+    }
+    if m.contains("srt") || m.contains("korail") || m.contains("철도") || m.contains("코레일") || m.contains("고속버스") || m.contains("airline") || m.contains("항공") || m.contains("jeju air") || m.contains("tway") || m.contains("대한항공") || m.contains("아시아나") {
+        return Some("여비교통비(출장)".to_string());
+    }
+
+    // 3. Dining & Welfare (복리후생비 or 접대비)
+    if m.contains("starbucks") || m.contains("스타벅스") || m.contains("투썸") || m.contains("twosome") || m.contains("ediya") || m.contains("이디야") || m.contains("커피") || m.contains("coffee") || m.contains("cafe") || m.contains("카페") || m.contains("빽다방") || m.contains("메가커피") {
+        return Some("복리후생비(음료)".to_string());
+    }
+    if m.contains("식당") || m.contains("restau") || m.contains("포차") || m.contains("고기") || m.contains("치킨") || m.contains("피자") || m.contains("한식") || m.contains("일식") || m.contains("중식") || m.contains("요리") || m.contains("밥") || m.contains("김밥") {
+        return Some("복리후생비(식대)".to_string());
+    }
+    if m.contains("편의점") || m.contains("gs25") || m.contains("cu") || m.contains("세븐일레븐") || m.contains("다이소") || m.contains("daiso") || m.contains("마트") || m.contains("mart") || m.contains("emart") || m.contains("이마트") || m.contains("홈플러스") || m.contains("컬리") || m.contains("kurly") {
+        return Some("복리후생비(소모품)".to_string());
+    }
+
+    // 4. Logistics & Post (소모품비 or 운반비)
+    if m.contains("우체국") || m.contains("post") || m.contains("택배") || m.contains("delivery") || m.contains("logis") || m.contains("퀵서비스") || m.contains("quick") || m.contains("배달") {
+        return Some("운반비".to_string());
+    }
+
+    // 5. Office Supplies & Others
+    if m.contains("문구") || m.contains("office") || m.contains("오피스") || m.contains("교보") || m.contains("영풍") || m.contains("서점") || m.contains("book") || m.contains("yes24") || m.contains("알라딘") || m.contains("도서") {
+        return Some("도서인쇄비".to_string());
+    }
+    if m.contains("parking") || m.contains("주차") || m.contains("하이패스") || m.contains("hipass") || m.contains("차량") || m.contains("car") || m.contains("수리") || m.contains("정비") || m.contains("오일") || m.contains("oil") || m.contains("주유") || m.contains("sk에너지") || m.contains("gs칼텍스") || m.contains("s-oil") || m.contains("현대오일") {
+        return Some("차량유지비".to_string());
+    }
+
+    // 6. Tax & Fees
+    if m.contains("국세청") || m.contains("세무서") || m.contains("공과금") || m.contains("세금") || m.contains("관납") || m.contains("법인세") || m.contains("부가세") || m.contains("지방세") {
+        return Some("세금과공공".to_string());
+    }
+
+    None
+}
+
 fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str, file_name: &str, row_idx: usize) -> Option<ParsedTransaction> {
     let date_raw = col_map.get("tx_date").and_then(|&i| row.get(i)).cloned().unwrap_or_default();
     let amount_raw = col_map.get("amount").and_then(|&i| row.get(i)).cloned().unwrap_or_default();
@@ -421,7 +487,21 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     let bank_name = col_map.get("bank_name").and_then(|&i| row.get(i)).cloned();
     let bank_account = col_map.get("bank_account").and_then(|&i| row.get(i)).cloned();
     let category = col_map.get("category").and_then(|&i| row.get(i)).cloned();
-    let account_subject = col_map.get("account_name").and_then(|&i| row.get(i)).cloned(); // [Antigravity] Extract Subject
+    let mut account_subject = col_map.get("account_name").and_then(|&i| row.get(i)).cloned(); // [Antigravity] Extract Subject
+
+    // [Antigravity] Smart Account Inference (If explicitly missing in source file)
+    if account_subject.is_none() || account_subject.as_ref().map(|s| s.is_empty() || s == "기타").unwrap_or(false) {
+         if let Some(suggestion) = suggest_account_from_merchant(&vendor) {
+             account_subject = Some(suggestion);
+             println!("[AI Engine] Inferred Account for {}: {}", vendor, account_subject.as_ref().unwrap());
+         }
+    }
+
+    // [Step 3] Card Deep-Dive Extraction
+    let installment_period = col_map.get("installment_period").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
+    let installment_seq = col_map.get("installment_seq").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
+    let benefit_amount = col_map.get("benefit_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
+    let billable_amount = col_map.get("billable_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
 
     // Journal Entry Specifics
     let debit_account_mapped = col_map.get("debit_account").and_then(|&i| row.get(i)).cloned();
@@ -430,7 +510,23 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     let entry_type_mapped = col_map.get("entry_type").and_then(|&i| row.get(i)).cloned();
 
     let clean_date = sanitize_date(&date_raw);
-    let clean_amount = sanitize_amount(&amount_raw);
+    let mut clean_amount = sanitize_amount(&amount_raw);
+
+    // [CFO Architecture] Principle: Prioritize Billable Amount (Net of Benefits/Installments) for the ledger
+    if let Some(ba) = billable_amount {
+        if ba != 0.0 {
+            clean_amount = ba;
+        }
+    }
+
+    // [CFO Strategy] Extract Card Identity for specific AP mapping
+    let card_brand = if file_name.to_lowercase().contains("hana") || file_name.contains("하나") { Some("하나카드") }
+                    else if file_name.to_lowercase().contains("shinhan") || file_name.contains("신한") || file_name.to_lowercase().contains("sh") { Some("신한카드") }
+                    else if file_name.to_lowercase().contains("samsung") || file_name.contains("삼성") { Some("삼성카드") }
+                    else if file_name.to_lowercase().contains("hyundai") || file_name.contains("현대") { Some("현대카드") }
+                    else if file_name.to_lowercase().contains("kookmin") || file_name.contains("국민") || file_name.to_lowercase().contains("kb") { Some("국민카드") }
+                    else if file_name.to_lowercase().contains("woori") || file_name.contains("우리") { Some("우리카드") }
+                    else { None };
     let clean_vat = vat_raw.as_ref().map(|v| sanitize_amount(v)).unwrap_or((clean_amount.abs() / 11.0).round());
 
     // [Antigravity] Survival-mode Validation
@@ -451,7 +547,9 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
 
     // In journal mode, be sparse. In smart mode, apply defaults.
     if !is_journal_mode {
-        if debit_account.is_none() { debit_account = Some("미확정 비용".to_string()); }
+        if debit_account.is_none() { 
+            debit_account = account_subject.clone().or(Some("미확정 비용".to_string()));
+        }
         if credit_account.is_none() { credit_account = Some("미지급금".to_string()); }
     }
 
@@ -463,11 +561,16 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
                 credit_account = Some("현금".to_string());
             } else if m.contains("이체") || m.contains("transfer") || m.contains("통장") {
                 credit_account = Some("보통예금".to_string());
-            } else if m.contains("카드") || m.contains("card") || m.contains("신용") {
-                credit_account = Some("미지급금".to_string());
-            } else if m.contains("승인") { 
-                credit_account = Some("미지급금".to_string());
+            } else if m.contains("카드") || m.contains("card") || m.contains("신용") || m.contains("승인") {
+                if let Some(brand) = card_brand {
+                    credit_account = Some(format!("미지급금({})", brand));
+                } else {
+                    credit_account = Some("미지급금".to_string());
+                }
             }
+        } else if let Some(brand) = card_brand {
+             // If no payment method found but file name suggests a specific card, use it
+             credit_account = Some(format!("미지급금({})", brand));
         }
     }
 
@@ -524,6 +627,10 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
             format!("[{}] Ingestion: {}", chrono::Local::now().format("%H:%M:%S"), if is_journal_mode { "Journal Import" } else { "Smart Mapping" })
         ],
         id: Some(crate::utils::id_generator::generate_id(&clean_date, crate::utils::id_generator::IdPrefix::AI)),
+        installment_period,
+        installment_seq,
+        benefit_amount,
+        billable_amount,
         ..Default::default()
     };
     

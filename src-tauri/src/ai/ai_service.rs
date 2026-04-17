@@ -2,10 +2,11 @@ use crate::core::models::ParsedTransaction;
 use serde_json::json;
 
 // [Antigravity] Centralized Model Configuration
-// [Antigravity] AI Cost Weights
+// [Antigravity] AI Cost Weights (Adjusted for better UX)
 pub const WEIGHT_TEXT: u32 = 1;
-pub const WEIGHT_VISION: u32 = 5;
-pub const WEIGHT_TRAIN: u32 = 10;
+pub const WEIGHT_VISION: u32 = 2; // Reduced from 5
+pub const WEIGHT_TRAIN: u32 = 5;  // Reduced from 10
+
 
 fn get_ai_model() -> String {
     std::env::var("AI_MODEL_NAME").unwrap_or_else(|_| "gemini-2.0-flash-exp".to_string())

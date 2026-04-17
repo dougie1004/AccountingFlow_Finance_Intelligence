@@ -11,24 +11,42 @@ export const sumCashAccounts = (ledger: JournalEntry[], targetDate: string): num
     ledger.forEach(e => {
         // [STRICT] Only process Approved (Authorized) entries for "Actual" cash
         if (e.status !== 'Approved') return;
-        // Also ensure we are not accidentally processing scenario scope entries if they leaked into the global ledger
-        if (e.scope && e.scope !== 'actual') return;
+        
+        // [V12.1] Simulation Support: If we are viewing a simulation, we WANT to sum its projected cash.
+        // We only exclude if explicitly marked as something else, but 'actual', 'scenario', 'future' are allowed here
+        // as the caller (AccountingContext) provides the relevant ledger slice.
+        if (e.scope && e.scope !== 'actual' && e.scope !== 'scenario' && e.scope !== 'future') return;
         
         if (e.date > targetDate) return;
 
-        const isCashDebit = CASH_ACCOUNT_IDENTIFIERS.some(id => 
-            e.debitAccount.toLowerCase().includes(id.toLowerCase()) || 
-            (e.debitAccountId && e.debitAccountId.includes(id))
-        );
-        const isCashCredit = CASH_ACCOUNT_IDENTIFIERS.some(id => 
-            e.creditAccount.toLowerCase().includes(id.toLowerCase()) || 
-            (e.creditAccountId && e.creditAccountId.includes(id))
-        );
-        
-        const total = e.amount + (e.vat || 0);
+        // Support for Complex (Multi-line) Entries
+        if (e.complexLines && e.complexLines.length > 0) {
+            e.complexLines.forEach(line => {
+                const isCash = CASH_ACCOUNT_IDENTIFIERS.some(id => 
+                    (line.account?.toLowerCase() || '').includes(id.toLowerCase()) || 
+                    (line.accountId && line.accountId.includes(id))
+                );
+                if (isCash) {
+                    if (line.debit > 0) balance += line.debit;
+                    if (line.credit > 0) balance -= line.credit;
+                }
+            });
+        } else {
+            // Standard Double-entry
+            const isCashDebit = CASH_ACCOUNT_IDENTIFIERS.some(id => 
+                (e.debitAccount?.toLowerCase() || '').includes(id.toLowerCase()) || 
+                (e.debitAccountId && e.debitAccountId.includes(id))
+            );
+            const isCashCredit = CASH_ACCOUNT_IDENTIFIERS.some(id => 
+                (e.creditAccount?.toLowerCase() || '').includes(id.toLowerCase()) || 
+                (e.creditAccountId && e.creditAccountId.includes(id))
+            );
+            
+            const total = (e.amount || 0) + (e.vat || 0);
 
-        if (isCashDebit) balance += total;
-        if (isCashCredit) balance -= total;
+            if (isCashDebit) balance += total;
+            if (isCashCredit) balance -= total;
+        }
     });
     return balance;
 };

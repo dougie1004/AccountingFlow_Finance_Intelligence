@@ -320,6 +320,8 @@ export const generateMultiYearSimulation = (years: number[], cfg: ScenarioConfig
                     vat: 0, // Manual complex lines
                     type: 'Revenue',
                     status: 'Approved',
+                    debitAccount: '',
+                    creditAccount: '',
                     complexLines: [
                         { account: '지급수수료', accountId: 'acc_825', debit: grantTranche, credit: 0 }, // Expense
                         { account: '부가세대급금', accountId: 'acc_135', debit: vatAmt, credit: 0 }, // Input VAT
