@@ -68,6 +68,16 @@ export interface JournalEntry {
     installmentSeq?: number;
     benefitAmount?: number;
     billableAmount?: number;
+    principalAmount?: number;
+    feeAmount?: number;
+    taxAmount?: number;
+    totalAmount?: number;
+    inference?: { 
+        category: string; 
+        accountName: string; 
+        reasoning: string; 
+        confidence: string; 
+    };
 }
 
 export interface LedgerLine {
@@ -301,6 +311,7 @@ export interface Partner {
 }
 
 export type ParseStatus = 'ok' | 'warning' | 'needConfirm' | 'error';
+export type RowType = 'transaction' | 'summary' | 'unknown';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
@@ -370,6 +381,12 @@ export interface ParsedTransaction {
     installmentSeq?: number;
     benefitAmount?: number;
     billableAmount?: number;
+    rowType?: RowType;
+    principalAmount?: number;
+    feeAmount?: number;
+    taxAmount?: number;
+    totalAmount?: number;
+    reconciliationStatus?: string;
 }
 
 export interface ComplianceReview {

@@ -38,13 +38,16 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onTransactionsLoaded
 
                 if (isStructured) {
                     try {
-                        const headers = await invoke<string[]>('get_file_headers', {
+                        const fileInfo = await invoke<{ headers: string[], samples: string[][] }>('get_file_headers', {
                             fileBytes: Array.from(bytes),
                             fileName: file.name
                         });
-                        const initialMapping = await invoke<Record<string, string>>('suggest_file_mapping', { headers });
+                        const initialMapping = await invoke<Record<string, string>>('suggest_file_mapping', { 
+                            headers: fileInfo.headers, 
+                            samples: fileInfo.samples 
+                        });
 
-                        structuredQueue.push({ bytes: Array.from(bytes), name: file.name, headers, initialMapping });
+                        structuredQueue.push({ bytes: Array.from(bytes), name: file.name, headers: fileInfo.headers, initialMapping });
                         continue; // Process next file in loop
                     } catch (err) {
                         console.warn("Structured parsing failed, falling back to AI:", err);

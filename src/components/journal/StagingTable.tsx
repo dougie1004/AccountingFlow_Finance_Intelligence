@@ -1,5 +1,5 @@
 import React, { useState, useContext } from 'react';
-import { Loader2, Database, CheckCircle2, AlertTriangle, MessageSquare, History as HistoryIcon, FileText, Zap, Download, Shield, Trash2, Landmark, Boxes, Plus, TrendingDown, Calculator } from 'lucide-react';
+import { Loader2, Database, CheckCircle2, AlertTriangle, MessageSquare, History as HistoryIcon, FileText, Zap, Download, Shield, Trash2, Landmark, Boxes, Plus, TrendingDown, Calculator, CreditCard, BrainCircuit } from 'lucide-react';
 import { useAI } from '../../hooks/useAI';
 import { useMassProcessor } from '../../hooks/useMassProcessor';
 import { JournalEntry, Partner, ParsedTransaction } from '../../types';
@@ -232,22 +232,34 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
             alert('계정과목을 먼저 지정해야 합니다.');
             return;
         }
-
         try {
             setIsValidating(true);
-            let id = crypto.randomUUID();
-            if (isTauri()) {
-                id = await invoke('generate_journal_id', {
-                    date: tx.date || new Date().toISOString().split('T')[0],
-                    entryType: tx.entryType
-                });
+            const entriesToConfirm: JournalEntry[] = [];
+            
+            if (tx.rowType === 'summary') {
+                alert('요약행(Summary)은 전표로 생성할 수 없습니다. 검증용으로만 사용하세요.');
+                return;
             }
+
+            const groupId = tx.transactionId || tx.id || crypto.randomUUID();
+            const baseDate = tx.date || new Date().toISOString().split('T')[0];
+
+            // Helper to generate IDs
+            const getNewId = async () => {
+                if (isTauri()) {
+                    return await invoke<string>('generate_journal_id', {
+                        date: baseDate,
+                        entryType: tx.entryType
+                    });
+                }
+                return crypto.randomUUID();
+            };
 
             const finalCompliance = (tx as any).discrepancyReason
                 ? `[증빙불일치 사유: ${(tx as any).discrepancyReason}] | ${tx.reasoning}`
                 : tx.reasoning;
 
-            // --- Advanced Pairing Logic (Deterministic first) ---
+            // Standard Accounts
             let debitAccount = getDisplayAccountName(tx.debitAccount);
             let creditAccount = getDisplayAccountName(tx.creditAccount);
             const mainAccount = getDisplayAccountName(tx.accountName);
@@ -266,23 +278,99 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                 if (!creditAccount) creditAccount = tx.entryType === 'Revenue' ? '보통예금' : '미지급금';
             }
 
-            const entry: JournalEntry = {
-                id,
-                date: tx.date || new Date().toISOString().split('T')[0],
-                description: tx.description,
-                vendor: tx.vendor,
-                debitAccount,
-                creditAccount,
-                amount: tx.amount,
-                vat: tx.vat,
-                type: tx.entryType as any,
-                status: 'Unconfirmed',
-                complianceContext: finalCompliance,
-                attachmentUrl: (tx as any).attachmentUrl,
-                auditTrail: [...(tx.auditTrail || []), `Confirmed to Ledger (Single) on ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`]
-            };
+            const hasComponents = tx.principalAmount || tx.feeAmount || tx.benefitAmount || tx.taxAmount;
 
-            onConfirm([entry]);
+            if (hasComponents) {
+                // Split logic
+                if (tx.principalAmount) {
+                    entriesToConfirm.push({
+                        id: await getNewId(),
+                        transactionId: groupId,
+                        date: baseDate,
+                        description: `${tx.description} (원금)`,
+                        vendor: tx.vendor,
+                        debitAccount,
+                        creditAccount,
+                        amount: tx.principalAmount,
+                        vat: 0,
+                        type: tx.entryType as any,
+                        status: 'Unconfirmed',
+                        complianceContext: tx.reasoning,
+                        auditTrail: [...(tx.auditTrail || []), 'Split Entry: Principal']
+                    });
+                }
+                if (tx.feeAmount) {
+                    entriesToConfirm.push({
+                        id: await getNewId(),
+                        transactionId: groupId,
+                        date: baseDate,
+                        description: `${tx.description} (수수료)`,
+                        vendor: tx.vendor,
+                        debitAccount: '지급수수료',
+                        creditAccount,
+                        amount: tx.feeAmount,
+                        vat: 0,
+                        type: tx.entryType as any,
+                        status: 'Unconfirmed',
+                        complianceContext: tx.reasoning,
+                        auditTrail: [...(tx.auditTrail || []), 'Split Entry: Fee']
+                    });
+                }
+                if (tx.taxAmount) {
+                    entriesToConfirm.push({
+                        id: await getNewId(),
+                        transactionId: groupId,
+                        date: baseDate,
+                        description: `${tx.description} (세액)`,
+                        vendor: tx.vendor,
+                        debitAccount: '부가세대급금',
+                        creditAccount,
+                        amount: tx.taxAmount,
+                        vat: 0,
+                        type: tx.entryType as any,
+                        status: 'Unconfirmed',
+                        complianceContext: tx.reasoning,
+                        auditTrail: [...(tx.auditTrail || []), 'Split Entry: Tax']
+                    });
+                }
+                if (tx.benefitAmount) {
+                    entriesToConfirm.push({
+                        id: await getNewId(),
+                        transactionId: groupId,
+                        date: baseDate,
+                        description: `${tx.description} (할인/혜택)`,
+                        vendor: tx.vendor,
+                        debitAccount: creditAccount, // Reducing AP
+                        creditAccount: '잡이익',
+                        amount: tx.benefitAmount,
+                        vat: 0,
+                        type: tx.entryType as any,
+                        status: 'Unconfirmed',
+                        complianceContext: tx.reasoning,
+                        auditTrail: [...(tx.auditTrail || []), 'Split Entry: Benefit']
+                    });
+                }
+            } else {
+                // Fallback / Standard Single Row
+                entriesToConfirm.push({
+                    id: await getNewId(),
+                    transactionId: groupId,
+                    date: baseDate,
+                    description: tx.description,
+                    vendor: tx.vendor,
+                    debitAccount,
+                    creditAccount,
+                    amount: tx.amount,
+                    vat: tx.vat,
+                    type: tx.entryType as any,
+                    status: 'Unconfirmed',
+                    complianceContext: finalCompliance,
+                    attachmentUrl: (tx as any).attachmentUrl,
+                    auditTrail: [...(tx.auditTrail || []), `Confirmed to Ledger (Single) on ${new Date().toLocaleDateString()}`]
+                });
+            }
+
+            onConfirm(entriesToConfirm);
             
             // Remove from staging
             setStagedData(prev => prev.filter((_, i) => i !== idx));
@@ -712,8 +800,33 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                 </div>
                             )}
 
-                            {/* Expert Note (Reasoning) */}
-                            {stagedData[selectedRow].reasoning && (
+                            {/* [V5] AI Reasoning Breakdown Display */}
+                            {(stagedData[selectedRow] as any).inference ? (
+                                <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-center gap-2 text-indigo-400">
+                                        <BrainCircuit size={16} />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">AI Reasoning Engine</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center bg-white/5 py-1.5 px-3 rounded-lg">
+                                            <span className="text-[9px] text-slate-500 font-bold uppercase">Estimated Category</span>
+                                            <span className="text-[10px] text-indigo-300 font-black">{(stagedData[selectedRow] as any).inference.category}</span>
+                                        </div>
+                                        <p className="text-[10px] leading-relaxed text-slate-400 font-medium px-1">
+                                            {(stagedData[selectedRow] as any).inference.reasoning}
+                                        </p>
+                                        <div className="flex items-center gap-2 pt-1">
+                                            <div className="h-1 flex-1 bg-white/5 rounded-full overflow-hidden">
+                                                <div 
+                                                    className={`h-full ${(stagedData[selectedRow] as any).inference.confidence === 'High' || (stagedData[selectedRow] as any).inference.confidence === 'UserVerified' ? 'bg-emerald-500' : 'bg-amber-500'}`} 
+                                                    style={{ width: (stagedData[selectedRow] as any).inference.confidence === 'High' || (stagedData[selectedRow] as any).inference.confidence === 'UserVerified' ? '95%' : '50%' }}
+                                                />
+                                            </div>
+                                            <span className="text-[9px] text-slate-500 font-black">{(stagedData[selectedRow] as any).inference.confidence}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : stagedData[selectedRow].reasoning && (
                                 <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-2">
                                     <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
                                         <Zap size={12} /> Cognitive Ledger Analytics
@@ -787,14 +900,33 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     <input
                                         list="staging-account-list"
                                         value={getDisplayAccountName(stagedData[selectedRow].accountName) || stagedData[selectedRow].accountName || ""}
-                                        onChange={(e) => {
+                                        onChange={async (e) => {
+                                            const newAccount = e.target.value;
                                             const newData = [...stagedData];
-                                            newData[selectedRow].accountName = e.target.value;
+                                            const vendor = newData[selectedRow].vendor;
+                                            
+                                            newData[selectedRow].accountName = newAccount;
                                             newData[selectedRow].needsClarification = false;
                                             newData[selectedRow].confidence = "High";
-                                            newData[selectedRow].reasoning = "사용자 수동 입력";
-                                            newData[selectedRow].isUserConfirmed = true; // Flag as confirmed
+                                            newData[selectedRow].reasoning = `범주: 사용자 수동 지정 (Learning Activated)`;
+                                            newData[selectedRow].isUserConfirmed = true;
+                                            
+                                            // Handle Double-Entry linkage
+                                            if (!newData[selectedRow].isJournalMode) {
+                                                newData[selectedRow].debitAccount = newAccount;
+                                            }
+                                            
                                             setStagedData(newData);
+
+                                            // [Self-Learning] Save to local rule engine
+                                            if (vendor && vendor !== "기타") {
+                                                try {
+                                                    await invoke('save_account_preference', { vendor, account: newAccount });
+                                                    console.log(`[Learning] Saved preference for ${vendor} -> ${newAccount}`);
+                                                } catch (err) {
+                                                    console.error("Failed to save preference:", err);
+                                                }
+                                            }
                                         }}
                                         placeholder={stagedData[selectedRow].isJournalMode ? "Primary Account (Optional in Journal Mode)" : "계정과목을 입력하거나 선택하세요..."}
                                         className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white font-bold text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all"
@@ -843,7 +975,7 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                     </datalist>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4">
+                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">Vendor (거래처)</label>
                                         <input
@@ -857,19 +989,78 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">Amount (금액)</label>
-                                        <input
-                                            type="number"
-                                            value={stagedData[selectedRow].amount || 0}
-                                            onChange={(e) => {
-                                                const newData = [...stagedData];
-                                                newData[selectedRow].amount = Number(e.target.value);
-                                                setStagedData(newData);
-                                            }}
-                                            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white font-mono font-bold text-xs focus:ring-1 focus:ring-indigo-500 outline-none"
-                                        />
+                                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block ml-1">
+                                            {stagedData[selectedRow].principalAmount ? 'Total Amount (최종금액)' : 'Amount (금액)'}
+                                        </label>
+                                        
+                                        {/* [Antigravity] Amount Breakdown Display */}
+                                        {stagedData[selectedRow].benefitAmount && stagedData[selectedRow].benefitAmount !== 0 ? (
+                                            <div className="mb-2 p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl space-y-1">
+                                                <div className="flex justify-between text-[10px]">
+                                                    <span className="text-slate-500 font-bold uppercase">Original (이용금액)</span>
+                                                    <span className="text-slate-300 font-black">₩{(stagedData[selectedRow].principalAmount || 0).toLocaleString()}</span>
+                                                </div>
+                                                <div className="flex justify-between text-[10px]">
+                                                    <span className="text-rose-400 font-bold uppercase">Discount (할인/혜택)</span>
+                                                    <span className="text-rose-400 font-black">- ₩{(stagedData[selectedRow].benefitAmount || 0).toLocaleString()}</span>
+                                                </div>
+                                            </div>
+                                        ) : null}
+
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-black text-xs">₩</span>
+                                            <input
+                                                type="text"
+                                                value={(stagedData[selectedRow].amount || 0).toLocaleString()}
+                                                onChange={(e) => {
+                                                    const val = parseFloat(e.target.value.replace(/,/g, ''));
+                                                    if (!isNaN(val)) {
+                                                        const newData = [...stagedData];
+                                                        newData[selectedRow].amount = val;
+                                                        setStagedData(newData);
+                                                    }
+                                                }}
+                                                className="w-full pl-7 pr-3 py-2 bg-indigo-500/5 border border-indigo-500/20 rounded-lg text-white font-black text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
+
+                                {/* Multi-Component Breakdown UI */}
+                                {(stagedData[selectedRow].principalAmount || stagedData[selectedRow].feeAmount || stagedData[selectedRow].taxAmount || stagedData[selectedRow].benefitAmount) && (
+                                    <div className="bg-indigo-500/5 border border-indigo-500/10 rounded-2xl p-4 space-y-3">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <CreditCard size={14} className="text-indigo-400" />
+                                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Financial Breakdown (상세 내역)</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            {stagedData[selectedRow].principalAmount !== undefined && (
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-500 uppercase">원금 (Principal)</label>
+                                                    <div className="text-xs font-black text-white">₩{stagedData[selectedRow].principalAmount.toLocaleString()}</div>
+                                                </div>
+                                            )}
+                                            {stagedData[selectedRow].feeAmount !== undefined && (
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-500 uppercase">수수료 (Fee)</label>
+                                                    <div className="text-xs font-black text-amber-400">₩{stagedData[selectedRow].feeAmount.toLocaleString()}</div>
+                                                </div>
+                                            )}
+                                            {stagedData[selectedRow].benefitAmount !== undefined && (
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-500 uppercase">혜택 (Benefit)</label>
+                                                    <div className="text-xs font-black text-emerald-400">₩{stagedData[selectedRow].benefitAmount.toLocaleString()}</div>
+                                                </div>
+                                            )}
+                                            {stagedData[selectedRow].taxAmount !== undefined && (
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-500 uppercase">세액 (Tax)</label>
+                                                    <div className="text-xs font-black text-cyan-400">₩{stagedData[selectedRow].taxAmount.toLocaleString()}</div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <div className="pt-2">
                                     <button
@@ -963,15 +1154,15 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                         <div className="grid grid-cols-2 gap-3">
                                             <div className="space-y-1">
                                                 <label className="text-[9px] font-black text-slate-500 uppercase">국민연금 (4.5%)</label>
-                                                <div className="text-xs font-bold text-white">₩{Math.floor(stagedData[selectedRow].amount * (config.taxPolicy?.insuranceRates?.nationalPension || 0.045)).toLocaleString()}</div>
+                                                <div className="text-xs font-bold text-white">₩{Math.floor((stagedData[selectedRow]?.amount || 0) * (config.taxPolicy?.insuranceRates?.nationalPension || 0.045)).toLocaleString()}</div>
                                             </div>
                                             <div className="space-y-1">
                                                 <label className="text-[9px] font-black text-slate-500 uppercase">건강보험 (3.545%)</label>
-                                                <div className="text-xs font-bold text-white">₩{Math.floor(stagedData[selectedRow].amount * (config.taxPolicy?.insuranceRates?.healthInsurance || 0.03545)).toLocaleString()}</div>
+                                                <div className="text-xs font-bold text-white">₩{Math.floor((stagedData[selectedRow]?.amount || 0) * (config.taxPolicy?.insuranceRates?.healthInsurance || 0.03545)).toLocaleString()}</div>
                                             </div>
                                             <div className="space-y-1">
                                                 <label className="text-[9px] font-black text-slate-500 uppercase">근로소득세 (간이세액 추정)</label>
-                                                <div className="text-xs font-bold text-rose-400">₩{Math.floor(stagedData[selectedRow].amount * 0.03).toLocaleString()}</div>
+                                                <div className="text-xs font-bold text-rose-400">₩{Math.floor((stagedData[selectedRow]?.amount || 0) * 0.03).toLocaleString()}</div>
                                             </div>
                                             <div className="space-y-1">
                                                 <label className="text-[9px] font-black text-slate-500 uppercase text-emerald-400">실수령액 (Net)</label>
@@ -1448,76 +1639,141 @@ export const StagingTable: React.FC<StagingTableProps> = ({ data, partners, onCo
                                 setIsValidating(true);
 
                                 try {
-                                    // Desktop-only ID Generation (Smart Key)
-                                    const entries = await Promise.all(stagedData.filter(r => r.accountName).map(async (tx) => {
-                                        let id = crypto.randomUUID();
-                                        if (isTauri()) {
-                                            try {
-                                                id = await invoke('generate_journal_id', {
-                                                    date: tx.date || new Date().toISOString().split('T')[0],
-                                                    entryType: tx.entryType
-                                                });
-                                            } catch (e) {
-                                                console.error("ID Generation Failed, fallback to UUID", e);
+                                    // 1. Filter out Summary Rows
+                                    const processableRows = stagedData.filter(r => r.rowType !== 'summary' && r.accountName);
+
+                                    const allNewEntries: JournalEntry[] = [];
+
+                                    for (const tx of processableRows) {
+                                        const groupId = tx.transactionId || tx.id || crypto.randomUUID();
+                                        const baseDate = tx.date || new Date().toISOString().split('T')[0];
+
+                                        const getNewId = async () => {
+                                            if (isTauri()) {
+                                                try {
+                                                    return await invoke<string>('generate_journal_id', {
+                                                        date: baseDate,
+                                                        entryType: tx.entryType
+                                                    });
+                                                } catch (e) {
+                                                    return crypto.randomUUID();
+                                                }
                                             }
-                                        }
+                                            return crypto.randomUUID();
+                                        };
 
-                                        // [Integrity V2] Connect the Audit Trace
-                                        const finalCompliance = (tx as any).discrepancyReason
-                                            ? `[증빙불일치 사유: ${(tx as any).discrepancyReason}] | ${tx.reasoning}`
-                                            : tx.reasoning;
-
-                                        // Determine Debit/Credit accounts based on composite position or simple entry logic
+                                        // Determine Primary Accounts
                                         let debitAccount = getDisplayAccountName(tx.debitAccount);
                                         let creditAccount = getDisplayAccountName(tx.creditAccount);
                                         const mainAccount = getDisplayAccountName(tx.accountName);
 
-                                        if (tx.isJournalMode && (debitAccount || creditAccount)) {
-                                            debitAccount = debitAccount || '[분개그룹 클리어링]';
-                                            creditAccount = creditAccount || '[분개그룹 클리어링]';
-                                        } else if (tx.position === 'Debit') {
-                                            debitAccount = mainAccount || '계정 미지정';
-                                            creditAccount = '[분개그룹 클리어링]';
-                                        } else if (tx.position === 'Credit') {
-                                            debitAccount = '[분개그룹 클리어링]';
-                                            creditAccount = mainAccount || '계정 미지정';
-                                        } else {
-                                            if (!debitAccount && !creditAccount && mainAccount) {
-                                                const type = tx.entryType || 'Expense';
-                                                if (['Revenue', 'Equity', 'Liability'].includes(type) || mainAccount.includes('자본') || mainAccount.includes('차입') || mainAccount.includes('매출')) {
-                                                    debitAccount = '보통예금';
-                                                    creditAccount = mainAccount;
-                                                } else {
-                                                    debitAccount = mainAccount;
-                                                    creditAccount = '미지급금';
-                                                }
+                                        if (!debitAccount && !creditAccount && mainAccount) {
+                                            const type = tx.entryType || 'Expense';
+                                            if (['Revenue', 'Equity', 'Liability'].includes(type) || mainAccount.includes('자본') || mainAccount.includes('차입') || mainAccount.includes('매출')) {
+                                                debitAccount = '보통예금';
+                                                creditAccount = mainAccount;
                                             } else {
-                                                if (!debitAccount) debitAccount = mainAccount || '계정 미지정';
-                                                if (!creditAccount) creditAccount = tx.entryType === 'Revenue' ? '보통예금' : '미지급금';
+                                                debitAccount = mainAccount;
+                                                creditAccount = '미지급금';
                                             }
-                                            if (!tx.isJournalMode && tx.entryType === 'Payroll') {
-                                                debitAccount = tx.debitAccount || '급여';
-                                                creditAccount = tx.creditAccount || '미지급급여';
-                                            }
+                                        } else {
+                                            if (!debitAccount) debitAccount = mainAccount || '계정 미지정';
+                                            if (!creditAccount) creditAccount = tx.entryType === 'Revenue' ? '보통예금' : '미지급금';
                                         }
 
-                                        return {
-                                            id,
-                                            transactionId: tx.transactionId,
-                                            date: tx.date || new Date().toISOString().split('T')[0],
-                                            description: tx.description,
-                                            vendor: tx.vendor,
-                                            debitAccount: debitAccount === '대기 중' ? '미지정 계정' : debitAccount,
-                                            creditAccount: creditAccount === '대기 중' ? (tx.entryType === 'Revenue' ? '현금/매수금' : '미지급금') : creditAccount,
-                                            amount: tx.amount,
-                                            vat: tx.vat,
-                                            type: tx.entryType,
-                                            status: 'Unconfirmed',
-                                            complianceContext: finalCompliance,
-                                            attachmentUrl: (tx as any).attachmentUrl,
-                                            auditTrail: [`Staged-to-Ledger handoff at ${new Date().toISOString()}`]
-                                        } as JournalEntry;
-                                    }));
+                                        const hasComponents = tx.principalAmount || tx.feeAmount || tx.benefitAmount || tx.taxAmount;
+
+                                        if (hasComponents) {
+                                            if (tx.principalAmount) {
+                                                allNewEntries.push({
+                                                    id: await getNewId(),
+                                                    transactionId: groupId,
+                                                    date: baseDate,
+                                                    description: `${tx.description} (원금)`,
+                                                    vendor: tx.vendor,
+                                                    debitAccount,
+                                                    creditAccount,
+                                                    amount: tx.principalAmount,
+                                                    vat: 0,
+                                                    type: tx.entryType as any,
+                                                    status: 'Unconfirmed',
+                                                    complianceContext: tx.reasoning,
+                                                    auditTrail: [`Split-to-Ledger (Principal) at ${new Date().toISOString()}`]
+                                                });
+                                            }
+                                            if (tx.feeAmount) {
+                                                allNewEntries.push({
+                                                    id: await getNewId(),
+                                                    transactionId: groupId,
+                                                    date: baseDate,
+                                                    description: `${tx.description} (수수료)`,
+                                                    vendor: tx.vendor,
+                                                    debitAccount: '지급수수료',
+                                                    creditAccount,
+                                                    amount: tx.feeAmount,
+                                                    vat: 0,
+                                                    type: tx.entryType as any,
+                                                    status: 'Unconfirmed',
+                                                    complianceContext: tx.reasoning,
+                                                    auditTrail: [`Split-to-Ledger (Fee) at ${new Date().toISOString()}`]
+                                                });
+                                            }
+                                            if (tx.taxAmount) {
+                                                allNewEntries.push({
+                                                    id: await getNewId(),
+                                                    transactionId: groupId,
+                                                    date: baseDate,
+                                                    description: `${tx.description} (세액)`,
+                                                    vendor: tx.vendor,
+                                                    debitAccount: '부가세대급금',
+                                                    creditAccount,
+                                                    amount: tx.taxAmount,
+                                                    vat: 0,
+                                                    type: tx.entryType as any,
+                                                    status: 'Unconfirmed',
+                                                    complianceContext: tx.reasoning,
+                                                    auditTrail: [`Split-to-Ledger (Tax) at ${new Date().toISOString()}`]
+                                                });
+                                            }
+                                            if (tx.benefitAmount) {
+                                                allNewEntries.push({
+                                                    id: await getNewId(),
+                                                    transactionId: groupId,
+                                                    date: baseDate,
+                                                    description: `${tx.description} (할인/혜택)`,
+                                                    vendor: tx.vendor,
+                                                    debitAccount: creditAccount,
+                                                    creditAccount: '잡이익',
+                                                    amount: tx.benefitAmount,
+                                                    vat: 0,
+                                                    type: tx.entryType as any,
+                                                    status: 'Unconfirmed',
+                                                    complianceContext: tx.reasoning,
+                                                    auditTrail: [`Split-to-Ledger (Benefit) at ${new Date().toISOString()}`]
+                                                });
+                                            }
+                                        } else {
+                                            // Standard Path
+                                            allNewEntries.push({
+                                                id: await getNewId(),
+                                                transactionId: groupId,
+                                                date: baseDate,
+                                                description: tx.description,
+                                                vendor: tx.vendor,
+                                                debitAccount,
+                                                creditAccount,
+                                                amount: tx.amount,
+                                                vat: tx.vat,
+                                                type: tx.entryType as any,
+                                                status: 'Unconfirmed',
+                                                complianceContext: tx.reasoning,
+                                                attachmentUrl: (tx as any).attachmentUrl,
+                                                auditTrail: [`Staged-to-Ledger at ${new Date().toISOString()}`]
+                                            });
+                                        }
+                                    }
+
+                                    const entries = allNewEntries;
 
                                     if (entries.length === 0) {
                                         alert('전송할 전표가 없습니다. 먼저 AI 분석을 통해 계정과목을 지정해 주세요.');

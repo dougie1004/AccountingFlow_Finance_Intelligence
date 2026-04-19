@@ -13,8 +13,6 @@ fn normalize_key(s: &str) -> String {
 }
 
 pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
-    let mut mapping = HashMap::new();
-    
     // Flatten and split if headers are clumped (Frontend/Backend consistency)
     let mut actual_headers = Vec::new();
     for h in headers {
@@ -25,81 +23,98 @@ pub fn suggest_mapping(headers: Vec<String>) -> HashMap<String, String> {
             actual_headers.push(h_clean);
         }
     }
+    suggest_mapping_robust(&actual_headers, &[])
+}
 
-    for header in actual_headers {
-        let h_norm = normalize_key(&header);
+pub fn suggest_mapping_slice(actual_headers: &[String]) -> HashMap<String, String> {
+    suggest_mapping_robust(actual_headers, &[])
+}
+
+/// [Antigravity] Robust Data-Driven Member Profiling
+/// Incorporates Header-Matching + Value-Pattern Recognition + Score-based Ranking
+pub fn suggest_mapping_robust(actual_headers: &[String], samples: &[Vec<String>]) -> HashMap<String, String> {
+    let mut mapping = HashMap::new();
+    
+    // Prohibited keywords that absolutely disqualify a column from being a primary Amount
+    let amount_prohibited = ["회차", "개월", "잔액", "기간", "seq", "period", "balance", "count", "건수", "단가"];
+    let payment_prohibited = ["원금", "금액", "수량", "세액", "fee", "tax"];
+
+    for (col_idx, header) in actual_headers.iter().enumerate() {
+        let h_norm = normalize_key(header);
+        let mut scores: HashMap<String, i32> = HashMap::new();
+
+        // [Value-Profiling] Deep-Dive into sample data if available
+        let col_samples: Vec<String> = samples.iter()
+            .filter_map(|row| row.get(col_idx).cloned())
+            .filter(|s| !s.trim().is_empty())
+            .collect();
+
+        // 1. Transaction Date Profiling
+        let mut date_score = 0;
+        if h_norm.contains("일자") || h_norm.contains("날짜") || h_norm.contains("date") || h_norm.contains("일시") || h_norm.contains("사용일") { date_score += 50; }
+        if !col_samples.is_empty() {
+             let date_matches = col_samples.iter().filter(|s| !sanitize_date(s).is_empty()).count();
+             if date_matches as f32 / col_samples.len() as f32 > 0.7 { date_score += 60; }
+        }
+        scores.insert("tx_date".to_string(), date_score);
+
+        // 2. Amount Profiling (High priority fix for User)
+        let mut amount_score = 0;
+        let is_prohibited = amount_prohibited.iter().any(|&p| h_norm.contains(p));
         
-        // 1. Transaction Date (Extended)
-        if h_norm.contains("일자") || h_norm.contains("날짜") || h_norm.contains("date") || h_norm.contains("일시") || h_norm.contains("time") || h_norm.contains("거래일") || h_norm.contains("사용일") || h_norm.contains("승인일") || h_norm.contains("취득") {
-            mapping.insert(header.clone(), "tx_date".to_string());
-        } 
-        // 2. Amount ([Antigravity] Prioritize Principal & Billable as primary Amount)
-        else if h_norm.contains("금액") || h_norm.contains("원금") || h_norm.contains("청구") || h_norm.contains("결제원금") || h_norm.contains("billable") || h_norm.contains("합계") || h_norm.contains("amount") || h_norm.contains("price") || h_norm.contains("총액") || h_norm.contains("공급") {
-            mapping.insert(header.clone(), "amount".to_string());
-        }
-        // 3. Vendor
-        else if h_norm.contains("상호") || h_norm.contains("거래처") || h_norm.contains("vendor") || h_norm.contains("가맹점") || h_norm.contains("판매자") || h_norm.contains("이용처") || h_norm.contains("업소명") || h_norm.contains("사용처") {
-            mapping.insert(header.clone(), "vendor".to_string());
-        }
-        // 4. Description / Remarks
-        else if h_norm.contains("내용") || h_norm.contains("적요") || h_norm.contains("description") || h_norm.contains("memo") || h_norm.contains("품명") || h_norm.contains("상세") || h_norm.contains("비고") || h_norm.contains("항목") {
-            mapping.insert(header.clone(), "description".to_string());
-        }
-        // 5. Payment Method ([Antigravity] Exclude Money keywords to prevent 'Principal' being mapped as 'Method')
-        else if (h_norm.contains("결제") || h_norm.contains("수단") || h_norm.contains("payment") || h_norm.contains("방식") || h_norm.contains("카드")) && !h_norm.contains("원금") && !h_norm.contains("금액") {
-             mapping.insert(header.clone(), "payment_type".to_string());
-        }
-        // 6. Bank Name
-        else if h_norm.contains("은행") || h_norm.contains("기관") || h_norm.contains("bank") {
-            mapping.insert(header.clone(), "bank_name".to_string());
-        }
-        // 7. Bank Account
-        else if h_norm.contains("계좌") || h_norm.contains("번호") {
-            mapping.insert(header.clone(), "bank_account".to_string());
-        }
-        // 8. Category (Explicit Classification: Equity, Expense, Revenue)
-        // [Antigravity] Fix: Removed 'type' to avoid confusion with "Entry Type" (Debit/Credit) column.
-        else if h_norm.contains("category") || h_norm.contains("분류") || h_norm.contains("구분") || h_norm.contains("class") {
-            mapping.insert(header.clone(), "category".to_string());
-        }
-        // 9. Entry Type Reference (Debit/Credit - Optional Helper)
-        else if h_norm.contains("entry type") || h_norm.contains("db/cr") || h_norm.contains("차대") {
-             mapping.insert(header.clone(), "dr_cr".to_string());
-        }
-        // [Antigravity] Re-mapping: Account Name / Subject (Prioritize over Bank Account)
-        else if h_norm == "account" || h_norm.contains("계정과목") || h_norm.contains("acct") || h_norm.contains("subject") {
-            mapping.insert(header.clone(), "account_name".to_string());
-        }
-        // 10. Explicit Journal Entry Mode (Debit/Credit Accounts)
-        else if h_norm.contains("debitaccount") || h_norm.contains("차변계정") {
-            mapping.insert(header.clone(), "debit_account".to_string());
-        }
-        else if h_norm.contains("creditaccount") || h_norm.contains("대변계정") {
-            mapping.insert(header.clone(), "credit_account".to_string());
-        }
-        // 11. VAT
-        else if h_norm == "vat" || h_norm.contains("부가세") || h_norm.contains("세액") {
-            mapping.insert(header.clone(), "vat".to_string());
-        }
-        // 12. Type
-        else if h_norm == "type" || h_norm.contains("유형") {
-            mapping.insert(header.clone(), "entry_type".to_string());
-        }
-        // 13. [CFO Strategy] Card Deep-Dive (Installments & Benefits)
-        else if h_norm.contains("할부") || h_norm.contains("개월") || h_norm.contains("period") {
-             mapping.insert(header.clone(), "installment_period".to_string());
-        }
-        else if h_norm.contains("회차") || h_norm.contains("seq") {
-             mapping.insert(header.clone(), "installment_seq".to_string());
-        }
-        else if h_norm.contains("혜택") || h_norm.contains("할인") || h_norm.contains("benefit") || h_norm.contains("discount") {
-             mapping.insert(header.clone(), "benefit_amount".to_string());
-        }
-        // Moved up to prioritize correctly over payment types
+        if !is_prohibited {
+            if h_norm.contains("금액") || h_norm.contains("amount") || h_norm.contains("price") || h_norm.contains("총액") { amount_score += 40; }
+            if h_norm.contains("원금") || h_norm.contains("결제원금") || h_norm.contains("이용금액") { amount_score += 60; }
+            if h_norm.contains("청구") && !h_norm.contains("회차") { amount_score += 30; }
 
-        // Fallback for Bank Account if it contains 'account' but wasn't caught above
-        else if h_norm.contains("account") {
-             mapping.insert(header.clone(), "bank_account".to_string());
+            if !col_samples.is_empty() {
+                let numeric_values: Vec<f64> = col_samples.iter().map(|s| sanitize_amount(s)).filter(|&v| v != 0.0).collect();
+                if !numeric_values.is_empty() {
+                    let avg = numeric_values.iter().sum::<f64>() / numeric_values.len() as f64;
+                    // Pro-logic: Real transaction amounts are usually large (>1000)
+                    if avg.abs() > 1000.0 { amount_score += 40; }
+                    // If all values are very small integers, it's likely a sequence, not an amount
+                    else if avg.abs() < 100.0 && numeric_values.iter().all(|&v| v == v.floor()) { amount_score -= 50; }
+                }
+            }
+        } else {
+            amount_score = -100; // Hard Rule Exclusion
+        }
+        scores.insert("amount".to_string(), amount_score);
+
+        // 3. Vendor Profiling
+        let mut vendor_score = 0;
+        if h_norm.contains("상호") || h_norm.contains("vendor") || h_norm.contains("가맹점") || h_norm.contains("설명") || h_norm.contains("내용") { vendor_score += 40; }
+        if !col_samples.is_empty() {
+            let string_ratio = col_samples.iter().filter(|s| sanitize_amount(s) == 0.0 && s.len() > 3).count();
+            if string_ratio as f32 / col_samples.len() as f32 > 0.8 { vendor_score += 30; }
+        }
+        scores.insert("vendor".to_string(), vendor_score);
+
+        // 4. Payment Method Profiling
+        let mut payment_score = 0;
+        let p_prohibited = payment_prohibited.iter().any(|&p| h_norm.contains(p));
+        if !p_prohibited {
+            if h_norm.contains("결제") || h_norm.contains("수단") || h_norm.contains("payment") || h_norm.contains("카드") { payment_score += 50; }
+            if h_norm.contains("잔액") || h_norm.contains("balance") { payment_score -= 40; } // Sequence/Balance columns often contain "결제후 잔액"
+        } else {
+             payment_score = -100;
+        }
+        scores.insert("payment_type".to_string(), payment_score);
+        
+        // 5. Detailed Component Profiling (Child scores dependent on Amount scoring)
+        if h_norm.contains("원금") || h_norm.contains("principal") { scores.insert("principal_amount".to_string(), 90); }
+        if h_norm.contains("수수료") || h_norm.contains("fee") { scores.insert("fee_amount".to_string(), 90); }
+        if h_norm.contains("세액") || h_norm.contains("tax") { scores.insert("tax_amount".to_string(), 90); }
+        if h_norm.contains("혜택") || h_norm.contains("할인") || h_norm.contains("benefit") { scores.insert("benefit_amount".to_string(), 90); }
+        if h_norm.contains("회차") || h_norm.contains("seq") { scores.insert("installment_seq".to_string(), 90); }
+        if h_norm.contains("할부") || h_norm.contains("개월") || h_norm.contains("period") { scores.insert("installment_period".to_string(), 90); }
+
+        // Find best match for this header
+        if let Some((best_field, score)) = scores.into_iter().max_by_key(|&(_, s)| s) {
+            if score > 20 {
+                mapping.insert(header.clone(), best_field);
+            }
         }
     }
     mapping
@@ -135,7 +150,14 @@ fn detect_delimiter(content: &str) -> u8 {
     }
 }
 
-pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String> {
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileUploadInfo {
+    pub headers: Vec<String>,
+    pub samples: Vec<Vec<String>>,
+}
+
+pub fn get_file_structure(bytes: &[u8], file_name: &str) -> Result<FileUploadInfo, String> {
     let ext = std::path::Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
     if ext == "xlsx" || ext == "xls" || ext == "xlsm" {
         let mut excel: Xlsx<_> = calamine::open_workbook_from_rs(Cursor::new(bytes)).map_err(|e: calamine::XlsxError| e.to_string())?;
@@ -148,13 +170,18 @@ pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String>
             .map(|row| row.iter().map(|c| deep_clean_value(&c.to_string())).collect())
             .collect();
 
-        if let Some((_, best_headers)) = find_best_header_row(&rows) {
-             return Ok(best_headers);
+        if let Some((best_idx, best_headers)) = find_best_header_row(&rows) {
+             let samples = rows.iter().skip(best_idx + 1).take(20).cloned().collect();
+             return Ok(FileUploadInfo { headers: best_headers, samples });
         }
         
         // Fallback to first row
         if let Some(row) = range.rows().next() {
-            return Ok(row.iter().map(|c| deep_clean_value(&c.to_string())).collect());
+            let headers = row.iter().map(|c| deep_clean_value(&c.to_string())).collect();
+            let samples = range.rows().skip(1).take(20)
+                .map(|r| r.iter().map(|c| deep_clean_value(&c.to_string())).collect())
+                .collect();
+            return Ok(FileUploadInfo { headers, samples });
         }
     } else {
         let decoded = crate::ai::robust_parser::detect_and_decode(bytes)?;
@@ -172,13 +199,15 @@ pub fn get_headers(bytes: &[u8], file_name: &str) -> Result<Vec<String>, String>
             .map(|r| r.iter().map(|s| deep_clean_value(s)).collect())
             .collect();
 
-        if let Some((_, best_headers)) = find_best_header_row(&records) {
-             return Ok(best_headers);
+        if let Some((best_idx, best_headers)) = find_best_header_row(&records) {
+             let samples = records.iter().skip(best_idx + 1).take(20).cloned().collect();
+             return Ok(FileUploadInfo { headers: best_headers, samples });
         }
         
         // Fallback: If heuristic failed, return first non-empty
         if let Some(first) = records.first() {
-            return Ok(first.clone());
+            let samples = records.iter().skip(1).take(20).cloned().collect();
+            return Ok(FileUploadInfo { headers: first.clone(), samples });
         }
     }
     Err("데이터 헤더를 찾을 수 없거나 파일이 비어있습니다.".into())
@@ -242,7 +271,6 @@ fn extract_global_metadata(rows: &[Vec<String>]) -> String {
 
         // Keywords that signal a document title/context
         if joined.contains("내역서") || joined.contains("고지서") || joined.contains("계산서") || joined.contains("청구서") || joined.contains("Statement") || joined.contains("Invoice") || joined.contains("명세") {
-             // Return cleaned title
              return joined.replace("[", "").replace("]", "").trim().to_string();
         }
     }
@@ -264,7 +292,6 @@ pub fn process_with_mapping(
     file_name: &str,
     mapping: HashMap<String, String>
 ) -> Result<Vec<ParsedTransaction>, String> {
-    // ... (existing code top part matches, skipping to loops)
     let ext = std::path::Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
     let mut results = Vec::new();
     println!("[Mapping Engine] Processing file: {} with {} mapping rules", file_name, mapping.len());
@@ -279,15 +306,12 @@ pub fn process_with_mapping(
         let sheet = excel.sheet_names().get(0).ok_or("No sheets")?.clone();
         let range = excel.worksheet_range(&sheet).map_err(|e: calamine::XlsxError| e.to_string())?;
         
-        // Dynamic Data Start Search
         let rows: Vec<Vec<String>> = range.rows()
              .map(|row| row.iter().map(|c| c.to_string()).map(|s| deep_clean_value(&s)).collect())
              .collect();
-        // ... (Header Search Logic - omitted for brevity because it relies on rows)
         
         let mut start_idx = 0;
         let mut col_map = HashMap::new();
-        // Delay metadata extraction until we find headers
 
         for (i, row) in rows.iter().enumerate().take(100) {
              let current_col_map = build_index_map(row, &mapping);
@@ -300,7 +324,6 @@ pub fn process_with_mapping(
         }
         
         let global_desc = if start_idx > 0 { extract_global_metadata(&rows[..start_idx-1]) } else { String::new() };
-        println!("[Mapping Engine] Detected Global Context (Above Header): '{}'", global_desc);
         
         if col_map.is_empty() { return Err("매핑된 헤더를 찾을 수 없습니다.".to_string()); }
 
@@ -317,7 +340,7 @@ pub fn process_with_mapping(
             .has_headers(false)
             .flexible(true)
             .delimiter(delimiter)
-            .trim(csv::Trim::All) // [Antigravity] Handle trailing/leading spaces
+            .trim(csv::Trim::All)
             .from_reader(decoded.as_bytes());
 
         let all_records: Vec<Vec<String>> = rdr.records()
@@ -327,10 +350,8 @@ pub fn process_with_mapping(
         
         let mut start_idx = 0;
         let mut col_map = HashMap::new();
-        // Delay metadata extraction until we find headers
 
         for (i, row) in all_records.iter().enumerate().take(100) {
-             // ... (Header Search Logic - simplified for replacement)
              let mut check_row = row.clone();
              if check_row.len() == 1 {
                  if check_row[0].contains('\t') { check_row = smart_split(&check_row[0], b'\t'); }
@@ -347,7 +368,6 @@ pub fn process_with_mapping(
         }
 
         let global_desc = if start_idx > 0 { extract_global_metadata(&all_records[..start_idx-1]) } else { String::new() };
-        println!("[Mapping Engine] Detected Global Context (Above Header): '{}'", global_desc);
 
         if col_map.is_empty() { return Err("매핑된 헤더를 CSV 파일에서 찾을 수 없습니다.".to_string()); }
 
@@ -361,14 +381,6 @@ pub fn process_with_mapping(
 
              if let Some(tx) = row_to_tx(&process_row, &col_map, &global_desc, file_name, idx + start_idx + 1) {
                  results.push(tx);
-             } else {
-                 if !process_row.iter().all(|s| s.is_empty()) {
-                     // [Antigravity] Hex Dump Check for failed rows
-                     let raw_dump: Vec<String> = process_row.iter().map(|s| {
-                         format!("{} (Hex: {:02X?})", s, s.as_bytes())
-                     }).collect();
-                     println!("[Mapping Engine] Failed to parse Row {}: {:?}", idx + start_idx + 1, raw_dump);
-                 }
              }
         }
     }
@@ -396,7 +408,6 @@ fn smart_split(s: &str, delimiter: u8) -> Vec<String> {
 fn build_index_map(headers: &[String], mapping: &HashMap<String, String>) -> HashMap<String, usize> {
     let mut index_map = HashMap::new();
     
-    // mapping is Header -> Standard. Maximize sensitivity by normalizing both.
     for (header, standard_field) in mapping {
         let m_norm = normalize_key(&header);
         for (i, h) in headers.iter().enumerate() {
@@ -408,68 +419,22 @@ fn build_index_map(headers: &[String], mapping: &HashMap<String, String>) -> Has
         }
     }
     
-    if index_map.is_empty() {
-        println!("[Mapping Engine] FATAL: index_map is empty. No headers matched the mapping keys.");
-        println!("  - Headers: {:?}", headers);
-        println!("  - Mapping: {:?}", mapping);
-    } else {
-        println!("[Mapping Engine] Successfully mapped indices: {:?}", index_map);
-    }
-    
     index_map
 }
 
-/// [Antigravity] Smart Merchant-to-Account Engine
-/// Inference logic for common Korean/Global vendors to GL accounts
-fn suggest_account_from_merchant(merchant: &str) -> Option<String> {
-    let m = merchant.to_lowercase();
+/// [Antigravity] Smart Merchant-to-Account Engine (V5 Bridge)
+fn suggest_account_from_merchant(vendor: &str, desc: &str) -> crate::core::models::AccountInference {
+    let mut tx = crate::core::models::ParsedTransaction::default();
+    tx.vendor = Some(vendor.to_string());
+    tx.description = Some(desc.to_string());
     
-    // 1. Digital Service / SaaS (지급임차료 or 소프트웨어)
-    if m.contains("openai") || m.contains("chatgpt") || m.contains("anthropic") || m.contains("perplexity") || m.contains("github") || m.contains("notion") || m.contains("slack") || m.contains("zoom") || m.contains("adobe") || m.contains("jetbrains") || m.contains("figma") || m.contains("canva") || m.contains("gamma") || m.contains("linear") || m.contains("framer") || m.contains("midjourney") {
-        return Some("지급임차료(SaaS)".to_string());
+    // Enhanced pattern matching
+    let v_norm = vendor.to_lowercase();
+    if v_norm.contains("쿠팡") || v_norm.contains("네이버") || v_norm.contains("배달") {
+        return crate::ai::rule_based_classifier::infer_account_v2(&tx);
     }
-    if m.contains("gabia") || m.contains("가비아") || m.contains("cafe24") || m.contains("카페24") || m.contains("aws") || m.contains("amazon web") || m.contains("google cloud") || m.contains("gcp") || m.contains("azure") || m.contains("heroku") || m.contains("vercel") || m.contains("google storage") {
-        return Some("지급임차료(Cloud)".to_string());
-    }
-
-    // 2. Transport (여비교통비)
-    if m.contains("kakao t") || m.contains("카카오t") || m.contains("카카오택시") || m.contains("uber") || m.contains("tada") || m.contains("타다") || m.contains("taxi") || m.contains("택시") {
-        return Some("여비교통비".to_string());
-    }
-    if m.contains("srt") || m.contains("korail") || m.contains("철도") || m.contains("코레일") || m.contains("고속버스") || m.contains("airline") || m.contains("항공") || m.contains("jeju air") || m.contains("tway") || m.contains("대한항공") || m.contains("아시아나") {
-        return Some("여비교통비(출장)".to_string());
-    }
-
-    // 3. Dining & Welfare (복리후생비 or 접대비)
-    if m.contains("starbucks") || m.contains("스타벅스") || m.contains("투썸") || m.contains("twosome") || m.contains("ediya") || m.contains("이디야") || m.contains("커피") || m.contains("coffee") || m.contains("cafe") || m.contains("카페") || m.contains("빽다방") || m.contains("메가커피") {
-        return Some("복리후생비(음료)".to_string());
-    }
-    if m.contains("식당") || m.contains("restau") || m.contains("포차") || m.contains("고기") || m.contains("치킨") || m.contains("피자") || m.contains("한식") || m.contains("일식") || m.contains("중식") || m.contains("요리") || m.contains("밥") || m.contains("김밥") {
-        return Some("복리후생비(식대)".to_string());
-    }
-    if m.contains("편의점") || m.contains("gs25") || m.contains("cu") || m.contains("세븐일레븐") || m.contains("다이소") || m.contains("daiso") || m.contains("마트") || m.contains("mart") || m.contains("emart") || m.contains("이마트") || m.contains("홈플러스") || m.contains("컬리") || m.contains("kurly") {
-        return Some("복리후생비(소모품)".to_string());
-    }
-
-    // 4. Logistics & Post (소모품비 or 운반비)
-    if m.contains("우체국") || m.contains("post") || m.contains("택배") || m.contains("delivery") || m.contains("logis") || m.contains("퀵서비스") || m.contains("quick") || m.contains("배달") {
-        return Some("운반비".to_string());
-    }
-
-    // 5. Office Supplies & Others
-    if m.contains("문구") || m.contains("office") || m.contains("오피스") || m.contains("교보") || m.contains("영풍") || m.contains("서점") || m.contains("book") || m.contains("yes24") || m.contains("알라딘") || m.contains("도서") {
-        return Some("도서인쇄비".to_string());
-    }
-    if m.contains("parking") || m.contains("주차") || m.contains("하이패스") || m.contains("hipass") || m.contains("차량") || m.contains("car") || m.contains("수리") || m.contains("정비") || m.contains("오일") || m.contains("oil") || m.contains("주유") || m.contains("sk에너지") || m.contains("gs칼텍스") || m.contains("s-oil") || m.contains("현대오일") {
-        return Some("차량유지비".to_string());
-    }
-
-    // 6. Tax & Fees
-    if m.contains("국세청") || m.contains("세무서") || m.contains("공과금") || m.contains("세금") || m.contains("관납") || m.contains("법인세") || m.contains("부가세") || m.contains("지방세") {
-        return Some("세금과공공".to_string());
-    }
-
-    None
+    
+    crate::ai::rule_based_classifier::infer_account_v2(&tx)
 }
 
 fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str, file_name: &str, row_idx: usize) -> Option<ParsedTransaction> {
@@ -478,7 +443,6 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     let vendor = col_map.get("vendor").and_then(|&i| row.get(i)).cloned().unwrap_or_else(|| "기타".to_string());
     let mut desc = col_map.get("description").and_then(|&i| row.get(i)).cloned().unwrap_or_default();
     
-    // [Antigravity] Context Injection: Only use global_desc if it's broad and valid
     if desc.trim().is_empty() && !global_desc.is_empty() {
         desc = global_desc.to_string();
     }
@@ -487,37 +451,68 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     let bank_name = col_map.get("bank_name").and_then(|&i| row.get(i)).cloned();
     let bank_account = col_map.get("bank_account").and_then(|&i| row.get(i)).cloned();
     let category = col_map.get("category").and_then(|&i| row.get(i)).cloned();
-    let mut account_subject = col_map.get("account_name").and_then(|&i| row.get(i)).cloned(); // [Antigravity] Extract Subject
+    let mut account_subject = col_map.get("account_name").and_then(|&i| row.get(i)).cloned();
 
-    // [Antigravity] Smart Account Inference (If explicitly missing in source file)
+    let mut inference = None;
     if account_subject.is_none() || account_subject.as_ref().map(|s| s.is_empty() || s == "기타").unwrap_or(false) {
-         if let Some(suggestion) = suggest_account_from_merchant(&vendor) {
-             account_subject = Some(suggestion);
-             println!("[AI Engine] Inferred Account for {}: {}", vendor, account_subject.as_ref().unwrap());
-         }
+        let inf = suggest_account_from_merchant(&vendor, &desc);
+        account_subject = Some(inf.account_name.clone());
+        inference = Some(inf.clone());
     }
 
     // [Step 3] Card Deep-Dive Extraction
-    let installment_period = col_map.get("installment_period").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
-    let installment_seq = col_map.get("installment_seq").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
+    let principal_amount = col_map.get("principal_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
     let benefit_amount = col_map.get("benefit_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
-    let billable_amount = col_map.get("billable_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
+    let fee_amount = col_map.get("fee_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
+    let tax_amount = col_map.get("tax_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
+    let total_amount = col_map.get("total_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
 
     // Journal Entry Specifics
     let debit_account_mapped = col_map.get("debit_account").and_then(|&i| row.get(i)).cloned();
     let credit_account_mapped = col_map.get("credit_account").and_then(|&i| row.get(i)).cloned();
-    let vat_raw = col_map.get("vat").and_then(|&i| row.get(i)).cloned();
+    let vat_raw = col_map.get("vat_amount").and_then(|&i| row.get(i)).cloned();
     let entry_type_mapped = col_map.get("entry_type").and_then(|&i| row.get(i)).cloned();
 
     let clean_date = sanitize_date(&date_raw);
     let mut clean_amount = sanitize_amount(&amount_raw);
 
-    // [CFO Architecture] Principle: Prioritize Billable Amount (Net of Benefits/Installments) for the ledger
+    // [CFO Architecture] Principle: Prioritize Principal + Components for the ledger
+    if let Some(pa) = principal_amount {
+        if pa != 0.0 && clean_amount == 0.0 {
+            clean_amount = pa;
+        }
+    }
+
     if let Some(ba) = billable_amount {
-        if ba != 0.0 {
+        if ba != 0.0 && clean_amount == 0.0 {
             clean_amount = ba;
         }
     }
+
+    // [Step 4] Row Classification (Transaction vs Summary vs Metadata)
+    let joined_row = row.join(" ");
+    let is_summary = joined_row.contains("합계") || joined_row.contains("청구금액") || joined_row.contains("소계") || joined_row.contains("Total");
+    
+    let row_type = if is_summary {
+        Some(crate::core::models::RowType::Summary)
+    } else if !clean_date.is_empty() && clean_amount != 0.0 {
+        Some(crate::core::models::RowType::Transaction)
+    } else {
+        None // Junk or Header
+    };
+
+    // [Antigravity] Survival-mode Validation
+    // 1. Skip rows that look like junk
+    if row_type.is_none() && !is_summary {
+        return None;
+    }
+
+    // 2. Strong skip for document titles
+    let lower_desc = desc.to_lowercase();
+    if lower_desc.contains("[") && lower_desc.contains("]") && lower_desc.contains("내역서") { return None; }
+    
+    // 3. Skip header-like rows that were accidentally picked up
+    if clean_date.is_empty() && clean_amount == 0.0 && desc.is_empty() { return None; }
 
     // [CFO Strategy] Extract Card Identity for specific AP mapping
     let card_brand = if file_name.to_lowercase().contains("hana") || file_name.contains("하나") { Some("하나카드") }
@@ -529,18 +524,6 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
                     else { None };
     let clean_vat = vat_raw.as_ref().map(|v| sanitize_amount(v)).unwrap_or((clean_amount.abs() / 11.0).round());
 
-    // [Antigravity] Survival-mode Validation
-    // 1. Skip rows that look like document titles or summaries
-    let lower_desc = desc.to_lowercase();
-    if lower_desc.contains("[") && lower_desc.contains("]") && lower_desc.contains("내역서") { return None; }
-    if lower_desc.contains("작성일자") || lower_desc.contains("관리번호") { return None; }
-    if lower_desc.contains("합계") || lower_desc.contains("total") || lower_desc.contains("소계") { return None; }
-
-    // 2. Date is mandatory
-    if clean_date.is_empty() {
-        return None;
-    }
-
     let is_journal_mode = debit_account_mapped.is_some() || credit_account_mapped.is_some();
     let mut debit_account = debit_account_mapped.clone();
     let mut credit_account = credit_account_mapped.clone();
@@ -548,7 +531,7 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     // In journal mode, be sparse. In smart mode, apply defaults.
     if !is_journal_mode {
         if debit_account.is_none() { 
-            debit_account = account_subject.clone().or(Some("미확정 비용".to_string()));
+            debit_account = account_subject.clone().or(Some("미분류".to_string()));
         }
         if credit_account.is_none() { credit_account = Some("미지급금".to_string()); }
     }
@@ -627,10 +610,13 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
             format!("[{}] Ingestion: {}", chrono::Local::now().format("%H:%M:%S"), if is_journal_mode { "Journal Import" } else { "Smart Mapping" })
         ],
         id: Some(crate::utils::id_generator::generate_id(&clean_date, crate::utils::id_generator::IdPrefix::AI)),
-        installment_period,
-        installment_seq,
+        principal_amount: principal_amount.or(Some(total_amount)),
         benefit_amount,
-        billable_amount,
+        fee_amount,
+        tax_amount,
+        total_amount,
+        row_type,
+        inference,
         ..Default::default()
     };
     
@@ -646,7 +632,7 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
             } else {
                 // Outflow -> Debit: Subject, Credit: Bank (or AP)
                 tx.entry_type = Some("Expense".to_string());
-                tx.debit_account = tx.account_name.clone().or(Some("미확정 비용".to_string()));
+                tx.debit_account = tx.account_name.clone().or(Some("미분류".to_string()));
                 // If payment method allows, use Bank, otherwise AP
                 if credit_account.as_ref().map(|s| s == "미지급금").unwrap_or(false) && (desc.contains("이체") || desc.contains("출금") || desc.contains("체크") || desc.contains("계좌")) {
                     tx.credit_account = Some("보통예금".to_string());
@@ -728,5 +714,6 @@ pub fn sanitize_date(s: &str) -> String {
         return format!("{}-{}-{}", year, month, day);
     }
 
-    s.to_string()
+    // 4. Return empty if not a valid date
+    String::new()
 }

@@ -9,6 +9,14 @@ pub enum ParseStatus {
     Error,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum RowType {
+    Transaction,
+    Summary,
+    Unknown,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum LedgerScope {
@@ -105,6 +113,7 @@ pub struct ParsedTransaction {
     #[serde(default)]
     pub is_journal_mode: bool,
     pub position: Option<String>,
+    pub inference: Option<AccountInference>,
 
     // [CFO Architecture] Ledger Isolation
     #[serde(default = "default_ledger_scope")]
@@ -116,6 +125,35 @@ pub struct ParsedTransaction {
     pub installment_seq: Option<u32>,
     pub benefit_amount: Option<f64>,
     pub billable_amount: Option<f64>,
+    pub principal_amount: Option<f64>,
+    pub fee_amount: Option<f64>,
+    pub tax_amount: Option<f64>,
+    pub total_amount: Option<f64>,
+    pub row_type: Option<RowType>,
+    pub reconciliation_status: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ExpenseCategory {
+    Infra,
+    Software,
+    Marketing,
+    Logistics,
+    Welfare,
+    Office,
+    TaxAndPublic,
+    Travel,
+    Other,
+    Unknown,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountInference {
+    pub category: ExpenseCategory,
+    pub account_name: String,
+    pub reasoning: String,
+    pub confidence: String,
 }
 
 fn default_ledger_scope() -> LedgerScope {

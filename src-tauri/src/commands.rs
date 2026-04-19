@@ -1,3 +1,4 @@
+use tauri::Manager;
 use crate::core::models::{
     Asset, AuditSnapshot, JournalEntry, Order, ParsedTransaction, SimulationResult, 
     TaxAdjustment, TenantConfig, AnalysisResponse, Partner, ValidationResult,
@@ -432,13 +433,13 @@ pub fn get_bank_presets() -> Vec<BankMapping> {
 }
 
 #[tauri::command]
-pub fn get_file_headers(file_bytes: Vec<u8>, file_name: String) -> Result<Vec<String>, String> {
-    crate::utils::converter::get_headers(&file_bytes, &file_name)
+pub fn get_file_headers(file_bytes: Vec<u8>, file_name: String) -> Result<crate::utils::converter::FileUploadInfo, String> {
+    crate::utils::converter::get_file_structure(&file_bytes, &file_name)
 }
 
 #[tauri::command]
-pub fn suggest_file_mapping(headers: Vec<String>) -> HashMap<String, String> {
-    crate::utils::converter::suggest_mapping(headers)
+pub fn suggest_file_mapping(headers: Vec<String>, samples: Vec<Vec<String>>) -> HashMap<String, String> {
+    crate::utils::converter::suggest_mapping_robust(&headers, &samples)
 }
 
 #[tauri::command]
@@ -734,7 +735,6 @@ pub async fn ask_ai_assistant(
             if entry.date.len() >= 7 {
                 let month = &entry.date[0..7];
                 let (rev, exp) = monthly_summary.entry(month.to_string()).or_insert((0.0, 0.0));
-                let nature = get_account_nature_marker(&entry.debit_account, &entry.credit_account);
                 
                 // Simplified classification for reasoning
                 if entry.credit_account.contains("매출") || entry.credit_account.contains("Revenue") || entry.credit_account.contains("401") {
@@ -843,4 +843,8 @@ fn get_account_nature_marker(debit: &str, credit: &str) -> String {
 pub fn sync_quota_status(tenant_id: String, cloud_usage: u32) {
     crate::core::quota_manager::QUOTA_MANAGER.sync_from_cloud(&tenant_id, cloud_usage);
 }
-
+#[tauri::command]
+pub fn save_account_preference(app_handle: tauri::AppHandle, vendor: String, account: String) -> Result<(), String> {
+    let app_dir = app_handle.path().app_data_dir().unwrap_or(std::path::PathBuf::from("."));
+    crate::ai::user_learning::save_preference(&app_dir, vendor, account)
+}

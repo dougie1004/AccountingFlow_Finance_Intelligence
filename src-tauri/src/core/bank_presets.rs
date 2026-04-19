@@ -56,6 +56,19 @@ pub static DEFAULT_PRESETS: Lazy<Vec<BankMapping>> = Lazy::new(|| {
                 ("공급자명", "vendor"),
                 ("품목", "description"),
             ].iter().cloned().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
+        BankMapping {
+            name: "하나카드 청구서 (Hana Card)".to_string(),
+            mapping: [
+                ("이용일자", "tx_date"),
+                ("가맹점명", "vendor"),
+                ("매출원금", "principal_amount"),
+                ("수수료", "fee_amount"),
+                ("마부금/할인", "benefit_amount"),
+                ("부가세", "tax_amount"),
+                ("청구금액", "total_amount"),
+                ("이용내용", "description"),
+            ].iter().cloned().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
         }
     ]
 });

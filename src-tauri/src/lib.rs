@@ -1,4 +1,5 @@
 // Modular Architecture
+use tauri::Manager;
 pub mod core;
 pub mod engine;
 pub mod scm;
@@ -46,6 +47,14 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .setup(|app| {
+            let app_dir = app.path().app_data_dir().unwrap_or(std::path::PathBuf::from("."));
+            if !app_dir.exists() {
+                let _ = std::fs::create_dir_all(&app_dir);
+            }
+            crate::ai::user_learning::init(&app_dir);
+            Ok(())
+        })
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             commands::parse_transaction,
@@ -100,6 +109,7 @@ pub fn run() {
             commands::generate_close_readiness_report,
             commands::get_quota_status,
             commands::sync_quota_status,
+            commands::save_account_preference,
             scenario_manager::debug_echo_journals,
 
 

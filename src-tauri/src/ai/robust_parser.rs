@@ -1,4 +1,4 @@
-use crate::core::models::{ParsedTransaction, ParseStatus};
+use crate::core::models::{ParsedTransaction, ParseStatus, RowType};
 use csv::ReaderBuilder;
 use encoding_rs::{EUC_KR, UTF_16LE};
 use std::io::Cursor;
@@ -37,7 +37,25 @@ fn clean_amount_with_status(val: &str) -> (f64, ParseStatus, Option<String>) {
     }
 }
 
-// ... (Inside parse_robust_csv loop) ...
+fn classify_row(fields: &[String]) -> RowType {
+    let combined = fields.join(" ").to_lowercase();
+    // Summary markers
+    if combined.contains("합계") || combined.contains("청구금액") || combined.contains("총금액") || combined.contains("total amount") || combined.contains("grand total") {
+        return RowType::Summary;
+    }
+    
+    // Transaction markers (Vendor, Approval ID, or significantly non-empty fields)
+    if combined.contains("가맹점") || combined.contains("이용일자") || combined.contains("승인번호") || combined.contains("가맹점명") {
+        return RowType::Transaction;
+    }
+
+    // Default heuristic: If we have multiple columns and the 0th/1st looks like date or text, it's likely a transaction
+    if fields.len() >= 2 && !fields[0].is_empty() {
+        return RowType::Transaction;
+    }
+
+    RowType::Unknown
+}
 
 /**
  * Robust CSV Parser V3
@@ -88,7 +106,7 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
 
     let mut current_annotations = Vec::new();
 
-    for (i, fields) in all_records.iter().enumerate().skip(start_row) {
+    for (_i, fields) in all_records.iter().enumerate().skip(start_row) {
         // Skip empty rows
         if fields.iter().all(|s| s.trim().is_empty()) { continue; }
         
@@ -121,6 +139,12 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
         let mut row_status = ParseStatus::Ok;
         let mut row_error = None;
 
+        let mut principal_amount = None;
+        let mut fee_amount = None;
+        let mut benefit_amount = None;
+        let mut tax_amount_val = None;
+        let mut total_amount_val = None;
+
         // 3. Extract Data
         if !col_map.is_empty() {
             if let Some(idx) = col_map.get("date") { date = fields.get(*idx).cloned().unwrap_or_default(); }
@@ -134,6 +158,28 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
                 }
             }
             
+            // [Antigravity] Extract Detailed Components if mapped
+            if let Some(idx) = col_map.get("principal_amount") {
+                let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
+                principal_amount = Some(val);
+            }
+            if let Some(idx) = col_map.get("fee_amount") {
+                let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
+                fee_amount = Some(val);
+            }
+            if let Some(idx) = col_map.get("benefit_amount") {
+                let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
+                benefit_amount = Some(val);
+            }
+            if let Some(idx) = col_map.get("tax_amount") {
+                let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
+                tax_amount_val = Some(val);
+            }
+            if let Some(idx) = col_map.get("total_amount") {
+                let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
+                total_amount_val = Some(val);
+            }
+
             if let Some(idx) = col_map.get("tax_base") { 
                 let (val, _, _) = clean_amount_with_status(fields.get(*idx).unwrap_or(&"".to_string()));
                 tax_base = val;
@@ -149,7 +195,7 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
              // Try getting amount from any column
              let mut found_amount = false;
              for f in fields.iter().skip(2) { // Skip known non-amount cols
-                 let (val, status, _) = clean_amount_with_status(f);
+                 let (val, _status, _) = clean_amount_with_status(f);
                  if val.abs() > 0.0 { 
                      amount = val;
                      found_amount = true;
@@ -163,6 +209,9 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
                  row_error = Some("Could not identify amount column automatically".to_string());
              }
         }
+
+        // [Antigravity] Row Classification
+        let row_type = classify_row(fields);
 
         // 4. Context Injection
         if description.trim().is_empty() { 
@@ -198,6 +247,14 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
             raw_data_snapshot: Some(raw_row_string),
             parse_error_msg: row_error,
             
+            // [Antigravity] New Detailed Fields
+            row_type: Some(row_type),
+            principal_amount,
+            fee_amount,
+            benefit_amount,
+            tax_amount: tax_amount_val,
+            total_amount: total_amount_val,
+
             ..Default::default()
         };
 
@@ -244,7 +301,39 @@ pub fn parse_robust_csv(data: Vec<u8>) -> Result<Vec<ParsedTransaction>, String>
     // [Step 1] Post-processing: Payroll/Insurance Splitting
     let results = split_payroll_rows(results);
 
+    // [Antigravity] Step 5 — Reconciliation Engine
+    let results = run_reconciliation_check(results);
+
     Ok(results)
+}
+
+fn run_reconciliation_check(mut entries: Vec<ParsedTransaction>) -> Vec<ParsedTransaction> {
+    let mut total_tx_sum = 0.0;
+    let mut summary_opt: Option<usize> = None;
+
+    for (i, tx) in entries.iter().enumerate() {
+        if tx.row_type == Some(RowType::Transaction) {
+            // Use billable_amount or principal_amount if available, else fallback to amount
+            let val = tx.billable_amount.or(tx.principal_amount).unwrap_or(tx.amount);
+            total_tx_sum += val;
+        } else if tx.row_type == Some(RowType::Summary) && summary_opt.is_none() {
+            summary_opt = Some(i);
+        }
+    }
+
+    if let Some(idx) = summary_opt {
+        let summary_total = entries[idx].total_amount.unwrap_or(entries[idx].amount);
+        if (total_tx_sum - summary_total).abs() < 1.0 {
+            entries[idx].reconciliation_status = Some("MATCH".to_string());
+            entries[idx].reasoning.push_str(" | [Recon] Sum of transactions matches summary total.");
+        } else {
+            entries[idx].reconciliation_status = Some("MISMATCH".to_string());
+            entries[idx].reasoning.push_str(&format!(" | [Recon] MISMATCH! Transactions: {}, Summary: {}", total_tx_sum, summary_total));
+            entries[idx].parse_status = Some(ParseStatus::Warning);
+        }
+    }
+
+    entries
 }
 
 fn split_payroll_rows(entries: Vec<ParsedTransaction>) -> Vec<ParsedTransaction> {
@@ -366,6 +455,21 @@ fn detect_columns(rows: &[Vec<String>]) -> (usize, HashMap<String, usize>) {
             } else if val.contains("desc") || val.contains("적요") || val.contains("비고") || val.contains("내용") {
                 map.insert("desc".to_string(), col_idx);
                 score += 2;
+            } else if val.contains("원금") || val.contains("principal") {
+                map.insert("principal_amount".to_string(), col_idx);
+                score += 3;
+            } else if val.contains("수수료") || val.contains("fee") {
+                map.insert("fee_amount".to_string(), col_idx);
+                score += 3;
+            } else if val.contains("할인") || val.contains("혜택") || val.contains("benefit") || val.contains("공제") {
+                map.insert("benefit_amount".to_string(), col_idx);
+                score += 3;
+            } else if val.contains("세액") || val.contains("부가세") || val.contains("vat") || val.contains("tax") {
+                map.insert("tax_amount".to_string(), col_idx);
+                score += 3;
+            } else if val.contains("청구") || val.contains("bill") || val.contains("total") {
+                map.insert("total_amount".to_string(), col_idx);
+                score += 3;
             }
         }
 
