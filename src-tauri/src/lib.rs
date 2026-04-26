@@ -13,27 +13,30 @@ mod commands;
 mod scenario_manager;
 
 fn load_env_from_parent() {
-    let paths = vec!["../.env", ".env"];
-    for path in paths {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            println!("[Antigravity] Found .env file at: {}", path);
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') { continue; }
-                if let Some((key, value)) = line.split_once('=') {
-                    let key = key.trim();
-                    let value = value.trim().trim_matches('"').trim_matches('\'');
-                    std::env::set_var(key, value);
-                    
-                    // Bridge VITE_ prefixed keys for backend compatibility
-                    if key == "VITE_GEMINI_API_KEY" && std::env::var("GEMINI_API_KEY").is_err() {
-                        std::env::set_var("GEMINI_API_KEY", value);
-                    }
-                }
-            }
-        } else {
-            println!("[Antigravity] No .env file found at: {}", path);
+    let is_debug = cfg!(debug_assertions);
+    let env_file = if is_debug { ".env.development" } else { ".env.production" };
+    
+    println!("[Antigravity] Build Mode: {}, Target Env: {}", if is_debug { "Debug" } else { "Release" }, env_file);
+
+    // Try multiple search paths for the env file
+    let search_paths = vec![
+        format!("./{}", env_file),
+        format!("../{}", env_file),
+        "./.env".to_string(),
+        "../.env".to_string(),
+    ];
+
+    let mut found = false;
+    for path in search_paths {
+        if dotenvy::from_filename(&path).is_ok() {
+            println!("[Antigravity] Successfully loaded environment from: {}", path);
+            found = true;
+            break;
         }
+    }
+
+    if !found {
+        println!("[Warning] No environment file (.env, .env.development, .env.production) found in search paths.");
     }
 }
 

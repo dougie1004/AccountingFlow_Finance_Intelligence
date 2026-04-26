@@ -1,6 +1,6 @@
 {
-    "productName": "AccountingFlow",
-    "version": "0.1.0",
+    "productName": "AccountingFlow_Pilot",
+    "version": "0.9.0-pilot",
     "identifier": "com.accountingflow.app",
     "build": {
         "beforeDevCommand": "npm run dev",

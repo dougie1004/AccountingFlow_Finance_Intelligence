@@ -126,6 +126,18 @@ export const LoginPage = () => {
                             </div>
                         </div>
                     )}
+
+                    <div className="mt-8 p-6 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl max-w-md">
+                        <div className="flex items-start gap-3">
+                            <Zap size={20} className="text-indigo-400 mt-1 flex-shrink-0" />
+                            <div>
+                                <p className="text-sm font-bold text-white mb-1">Instant CFO Experience</p>
+                                <p className="text-xs text-slate-400 leading-relaxed">
+                                    파일럿 프로그램 참여를 환영합니다. 로그인 시 <span className="text-indigo-400 font-bold">전략적 샘플 데이터</span>가 자동으로 로드됩니다. 업로드 없이 즉시 AI 분석 결과를 확인하세요.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Right: Auth Form */}

@@ -1,6 +1,7 @@
 import React, { createContext, useState, useMemo, ReactNode, useEffect, useCallback } from 'react';
 import { JournalEntry, Partner, SimulationResult, Asset, TenantConfig, InventoryItem, Order, FinancialSummary, ParsedTransaction, LedgerLine, TrialBalance, AccountDefinition, MacroAssumptions, AiChatMessage } from '../types';
 import { calculateTrialBalance, calculateFinancialsFromTB, unrollJournalToLedger, generateMultiYearSimulation } from '../core/engine';
+import { DEMO_DATA_V1 } from '../core/intelligence/demoData';
 import { sumCashAccounts } from '../core/ssot/cashTruth';
 import { CHART_OF_ACCOUNTS } from '../core/coa';
 import { ALL_ACCOUNTS, MASTER_ACCOUNTS } from '../constants/accounts';
@@ -127,6 +128,33 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
 
     const [quotaStatus, setQuotaStatus] = useState<{ daily_units: number, monthly_units: number, total_cost_usd: number } | null>(null);
 
+    const [ledger, setLedger] = useState<JournalEntry[]>(() => {
+        const saved = localStorage.getItem('accounting_ledger_v3');
+        return saved ? JSON.parse(saved) : INITIAL_DATA;
+    });
+
+    const [loading, setLoading] = useState(true);
+    const [partners, setPartners] = useState<Partner[]>(() => {
+        const saved = localStorage.getItem('accounting_partners');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [assets, setAssets] = useState<Asset[]>(() => {
+        const saved = localStorage.getItem('accounting_assets');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [inventory, setInventory] = useState<InventoryItem[]>(() => {
+        const saved = localStorage.getItem('accounting_inventory');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [scmOrders, setScmOrders] = useState<Order[]>(() => {
+        const saved = localStorage.getItem('accounting_scm_orders');
+        return saved ? JSON.parse(saved) : [];
+    });
+    const [stagingTransactions, setStagingTransactionsState] = useState<ParsedTransaction[]>(() => {
+        const saved = localStorage.getItem('accounting_staging_txs');
+        return saved ? JSON.parse(saved) : [];
+    });
+
     const refreshQuota = useCallback(async () => {
         try {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -162,9 +190,9 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             };
             syncToSupabase();
         }
-    }, [quotaStatus?.daily_units]); // Only sync when units actually change
+    }, [quotaStatus?.daily_units]);
 
-    // [V3.0] Realtime Listener for Remote Quota Resets (Subscription Payment)
+    // [V3.0] Realtime Listener for Remote Quota Resets
     useEffect(() => {
         let channel: any;
         const setupRealtime = async () => {
@@ -182,14 +210,10 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                     }, async (payload: any) => {
                         const newCloudCount = payload.new.ai_usage_count;
                         console.log("[Realtime Quota] Remote update detected:", newCloudCount);
-                        
-                        // Action: Sync this count to the Rust Gateway
                         await invoke('sync_quota_status', { 
                             tenantId: config.tenantId, 
                             cloudUsage: newCloudCount 
                         });
-                        
-                        // Also trigger a refresh in the local context state
                         refreshQuota();
                     })
                     .subscribe();
@@ -199,34 +223,38 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         return () => { if (channel) supabase.removeChannel(channel); };
     }, [config.tenantId, refreshQuota]);
 
+    // [V3.0] Hybrid Learning Sync: Mirror Vendor Intelligence to Cloud
+    useEffect(() => {
+        const syncPartnersToCloud = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user?.id && partners.length > 0) {
+                    const learnedPartners = partners.filter(p => p.tags?.includes('Self-Learned') || p.defaultDebitAccount);
+                    if (learnedPartners.length > 0) {
+                        const { error } = await supabase
+                            .from('vendor_knowledge')
+                            .upsert(
+                                learnedPartners.map(p => ({
+                                    user_id: session.user.id,
+                                    vendor_name: p.name,
+                                    default_account: p.defaultDebitAccount,
+                                    last_updated: new Date().toISOString()
+                                })),
+                                { onConflict: 'user_id,vendor_name' }
+                            );
+                        if (error) console.warn("[Hybrid Sync] Vendor intelligence sync failed:", error.message);
+                        else console.log("[Hybrid Sync] Successfully mirrored vendor learning to cloud.");
+                    }
+                }
+            } catch (err) {
+                console.warn("[Hybrid Sync] Auth session error:", err);
+            }
+        };
+        const timer = setTimeout(syncPartnersToCloud, 5000);
+        return () => clearTimeout(timer);
+    }, [partners]);
 
 
-    const [ledger, setLedger] = useState<JournalEntry[]>(() => {
-        const saved = localStorage.getItem('accounting_ledger_v3');
-        return saved ? JSON.parse(saved) : INITIAL_DATA;
-    });
-
-    const [loading, setLoading] = useState(true);
-    const [partners, setPartners] = useState<Partner[]>(() => {
-        const saved = localStorage.getItem('accounting_partners');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [assets, setAssets] = useState<Asset[]>(() => {
-        const saved = localStorage.getItem('accounting_assets');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [inventory, setInventory] = useState<InventoryItem[]>(() => {
-        const saved = localStorage.getItem('accounting_inventory');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [scmOrders, setScmOrders] = useState<Order[]>(() => {
-        const saved = localStorage.getItem('accounting_scm_orders');
-        return saved ? JSON.parse(saved) : [];
-    });
-    const [stagingTransactions, setStagingTransactionsState] = useState<ParsedTransaction[]>(() => {
-        const saved = localStorage.getItem('accounting_staging_txs');
-        return saved ? JSON.parse(saved) : [];
-    });
 
     const bridgeCardPayments = useCallback((txs: ParsedTransaction[]) => {
         const brands = ['하나카드', '삼성카드', '신한카드', '현대카드', '국민카드', '우리카드'];
@@ -534,14 +562,13 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
         }
     }, [ledger.length, migrateLedgerToIds]);
 
-    // [DEMO MODE] Load 3-year Strategic Scenario by default if empty on first load
-    // 대표님 요청: 전표를 올리지 않았는데 자동 생성되는 현상 방지. 임시로 주석 처리합니다.
+    // [V15 PILOT] Load Strategic Demo Scenario if empty on first load
     useEffect(() => {
         if (ledger.length === 0 && isInitialLoad.current) {
             isInitialLoad.current = false;
-            // console.log("[AccountingFlow] Initializing Demo Mode: 3-Year Strategic Baseline");
-            // const demo = generateMultiYearSimulation([2026, 2027, 2028], 'STANDARD');
-            // loadSimulation(demo);
+            console.log("[AccountingFlow] Initializing Pilot Demo Mode: Strategic Insight Baseline");
+            setLedger(DEMO_DATA_V1);
+            localStorage.setItem('accounting_ledger_v3', JSON.stringify(DEMO_DATA_V1));
         }
     }, [ledger.length]);
 
@@ -774,7 +801,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
     const resetData = useCallback(() => {
         if (!window.confirm("모든 장부 데이터와 설정을 초기화하시겠습니까? (이 작업은 되돌릴 수 없습니다)")) return;
 
-        isInitialLoad.current = false; 
+        isInitialLoad.current = true; // Allow re-seeding after reset
         setLedger(INITIAL_DATA);
         setPartners([]);
         setAssets([]);
