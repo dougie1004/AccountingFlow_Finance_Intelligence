@@ -103,12 +103,12 @@ pub fn suggest_mapping_robust(actual_headers: &[String], samples: &[Vec<String>]
         scores.insert("payment_type".to_string(), payment_score);
         
         // 5. Detailed Component Profiling (Child scores dependent on Amount scoring)
-        if h_norm.contains("원금") || h_norm.contains("principal") { scores.insert("principal_amount".to_string(), 90); }
-        if h_norm.contains("수수료") || h_norm.contains("fee") { scores.insert("fee_amount".to_string(), 90); }
-        if h_norm.contains("세액") || h_norm.contains("tax") { scores.insert("tax_amount".to_string(), 90); }
-        if h_norm.contains("혜택") || h_norm.contains("할인") || h_norm.contains("benefit") { scores.insert("benefit_amount".to_string(), 90); }
-        if h_norm.contains("회차") || h_norm.contains("seq") { scores.insert("installment_seq".to_string(), 90); }
-        if h_norm.contains("할부") || h_norm.contains("개월") || h_norm.contains("period") { scores.insert("installment_period".to_string(), 90); }
+        if h_norm.contains("원금") || h_norm.contains("principal") { scores.insert("principal_amount".to_string(), 95); }
+        if h_norm.contains("수수료") || h_norm.contains("fee") { scores.insert("fee_amount".to_string(), 95); }
+        if h_norm.contains("세액") || h_norm.contains("tax") { scores.insert("tax_amount".to_string(), 95); }
+        if h_norm.contains("혜택") || h_norm.contains("할인") || h_norm.contains("benefit") { scores.insert("benefit_amount".to_string(), 95); }
+        if h_norm.contains("회차") || h_norm.contains("seq") || h_norm.contains("seqno") { scores.insert("installment_seq".to_string(), 95); }
+        if h_norm.contains("개월") || h_norm.contains("period") || h_norm.contains("term") { scores.insert("installment_period".to_string(), 95); }
 
         // Find best match for this header
         if let Some((best_field, score)) = scores.into_iter().max_by_key(|&(_, s)| s) {
@@ -161,26 +161,40 @@ pub fn get_file_structure(bytes: &[u8], file_name: &str) -> Result<FileUploadInf
     let ext = std::path::Path::new(file_name).extension().and_then(|s| s.to_str()).unwrap_or_default().to_lowercase();
     if ext == "xlsx" || ext == "xls" || ext == "xlsm" {
         let mut excel: Xlsx<_> = calamine::open_workbook_from_rs(Cursor::new(bytes)).map_err(|e: calamine::XlsxError| e.to_string())?;
-        let sheet = excel.sheet_names().get(0).ok_or("No sheets")?.clone();
-        let range = excel.worksheet_range(&sheet).map_err(|e: calamine::XlsxError| e.to_string())?;
         
-        // [Antigravity] Smart Header Search for Excel
-        let rows: Vec<Vec<String>> = range.rows()
-            .take(100) // [FIX] Scan top 100 rows (Corporate card statements often have deep summaries)
-            .map(|row| row.iter().map(|c| deep_clean_value(&c.to_string())).collect())
-            .collect();
+        let sheet_names = excel.sheet_names().to_vec();
+        let mut best_overall_info: Option<FileUploadInfo> = None;
+        let mut max_overall_score = -1;
 
-        if let Some((best_idx, best_headers)) = find_best_header_row(&rows) {
-             let samples = rows.iter().skip(best_idx + 1).take(20).cloned().collect();
-             return Ok(FileUploadInfo { headers: best_headers, samples });
+        for sheet_name in &sheet_names {
+            // [CFO Strategy] Even during preview, skip noise sheets to find the real DATA
+            if sheet_name.contains("요약") || sheet_name.contains("Main") || sheet_name.contains("Guide") || sheet_name.contains("Notice") {
+                continue;
+            }
+
+            if let Ok(range) = excel.worksheet_range(sheet_name) {
+                let rows: Vec<Vec<String>> = range.rows()
+                    .take(100)
+                    .map(|row| row.iter().map(|c| deep_clean_value(&c.to_string())).collect())
+                    .collect();
+
+                if let Some((best_idx, best_headers)) = find_best_header_row(&rows) {
+                    let score = calculate_header_score(&best_headers);
+                    if score > max_overall_score {
+                        max_overall_score = score;
+                        let samples = rows.iter().skip(best_idx + 1).take(20).cloned().collect();
+                        best_overall_info = Some(FileUploadInfo { headers: best_headers, samples });
+                    }
+                }
+            }
         }
-        
-        // Fallback to first row
-        if let Some(row) = range.rows().next() {
-            let headers = row.iter().map(|c| deep_clean_value(&c.to_string())).collect();
-            let samples = range.rows().skip(1).take(20)
-                .map(|r| r.iter().map(|c| deep_clean_value(&c.to_string())).collect())
-                .collect();
+
+        if let Some(info) = best_overall_info {
+            return Ok(info);
+        } else if let Some(sheet) = sheet_names.get(0) {
+            let range = excel.worksheet_range(sheet).map_err(|e| e.to_string())?;
+            let headers = range.rows().next().map(|r| r.iter().map(|c| deep_clean_value(&c.to_string())).collect()).unwrap_or_default();
+            let samples = range.rows().skip(1).take(20).map(|r| r.iter().map(|c| deep_clean_value(&c.to_string())).collect()).collect();
             return Ok(FileUploadInfo { headers, samples });
         }
     } else {
@@ -214,35 +228,34 @@ pub fn get_file_structure(bytes: &[u8], file_name: &str) -> Result<FileUploadInf
 }
 
 // [Antigravity] Smart Header Detection Helper
+pub fn calculate_header_score(row: &[String]) -> i32 {
+    let mut score = 0;
+    let joined = row.join(" ").to_lowercase();
+    let non_empty_count = row.iter().filter(|s| !s.trim().is_empty()).count();
+    
+    // Core accounting signal keywords
+    if joined.contains("일자") || joined.contains("날짜") || joined.contains("date") || joined.contains("일시") || joined.contains("사용일") || joined.contains("거래일") { score += 10; }
+    if joined.contains("금액") || joined.contains("합계") || joined.contains("amount") || joined.contains("원") || joined.contains("공급") || joined.contains("가액") || joined.contains("이용금액") { score += 10; }
+    if joined.contains("거래처") || joined.contains("상호") || joined.contains("vendor") || joined.contains("성명") || joined.contains("가입자") || joined.contains("순번") || joined.contains("가맹점") || joined.contains("사용처") || joined.contains("이용처") { score += 10; }
+    if joined.contains("내용") || joined.contains("적요") || joined.contains("description") || joined.contains("비고") || joined.contains("항목") || joined.contains("승인번호") { score += 5; }
+    
+    if non_empty_count >= 8 { score += 15; }
+    else if non_empty_count >= 5 { score += 10; }
+    
+    let empty_count = row.iter().filter(|s| s.trim().is_empty()).count();
+    if row.len() > 1 && empty_count > row.len() / 2 { score -= 10; }
+    if joined.contains(":") || joined.contains("：") { score -= 5; }
+
+    score
+}
+
 fn find_best_header_row(rows: &[Vec<String>]) -> Option<(usize, Vec<String>)> {
     let mut best_score = 0;
     let mut best_idx = 0;
     let mut best_row = Vec::new();
 
     for (i, row) in rows.iter().enumerate() {
-        let mut score = 0;
-        let joined = row.join(" ").to_lowercase();
-        let non_empty_count = row.iter().filter(|s| !s.trim().is_empty()).count();
-        
-        // 1. Column Search Logic (Cumulative Scoring)
-        if joined.contains("일자") || joined.contains("날짜") || joined.contains("date") || joined.contains("일시") || joined.contains("사용일") || joined.contains("거래일") { score += 4; }
-        if joined.contains("취득") { score += 3; }
-        if joined.contains("금액") || joined.contains("합계") || joined.contains("amount") || joined.contains("원") || joined.contains("공급") || joined.contains("가액") || joined.contains("공급가") { score += 4; }
-        if joined.contains("산출") || joined.contains("보수") || joined.contains("보험료") || joined.contains("납부") || joined.contains("수당") || joined.contains("보수월액") { score += 3; }
-        if joined.contains("거래처") || joined.contains("상호") || joined.contains("vendor") || joined.contains("성명") || joined.contains("가입자") || joined.contains("순번") || joined.contains("가맹점") || joined.contains("사용처") || joined.contains("이용처") { score += 4; }
-        if joined.contains("내용") || joined.contains("적요") || joined.contains("description") || joined.contains("비고") || joined.contains("항목") || joined.contains("승인번호") { score += 2; }
-        if joined.contains("잔액") || joined.contains("balance") || joined.contains("결제원금") || joined.contains("수수료") { score += 1; }
-        
-        // 2. Structural Preference
-        if non_empty_count >= 8 { score += 10; } // Highly likely a transaction table
-        else if non_empty_count >= 5 { score += 5; }
-        else if non_empty_count >= 3 { score += 2; }
-        
-        // Penalize metadata rows (Title or Metadata like "Date: 123")
-        let empty_count = row.iter().filter(|s| s.trim().is_empty()).count();
-        if row.len() > 1 && empty_count > row.len() / 2 { score -= 6; }
-        if joined.contains(":") || joined.contains("：") { score -= 4; }
-
+        let score = calculate_header_score(row);
         if score > best_score {
             best_score = score;
             best_idx = i;
@@ -303,33 +316,52 @@ pub fn process_with_mapping(
 
     if ext == "xlsx" || ext == "xls" || ext == "xlsm" {
         let mut excel: Xlsx<_> = calamine::open_workbook_from_rs(Cursor::new(bytes)).map_err(|e: calamine::XlsxError| e.to_string())?;
-        let sheet = excel.sheet_names().get(0).ok_or("No sheets")?.clone();
-        let range = excel.worksheet_range(&sheet).map_err(|e: calamine::XlsxError| e.to_string())?;
         
-        let rows: Vec<Vec<String>> = range.rows()
-             .map(|row| row.iter().map(|c| c.to_string()).map(|s| deep_clean_value(&s)).collect())
-             .collect();
-        
-        let mut start_idx = 0;
-        let mut col_map = HashMap::new();
+        let sheet_names = excel.sheet_names().to_vec();
+        println!("[Mapping Engine] Detected {} sheets in Excel: {:?}", sheet_names.len(), sheet_names);
 
-        for (i, row) in rows.iter().enumerate().take(100) {
-             let current_col_map = build_index_map(row, &mapping);
-             if current_col_map.contains_key("tx_date") && current_col_map.contains_key("amount") {
-                 start_idx = i + 1; 
-                 col_map = current_col_map;
-                 println!("[Mapping Engine] Found Header at Excel Row {}: {:?}", i+1, row);
-                 break;
-             }
-        }
-        
-        let global_desc = if start_idx > 0 { extract_global_metadata(&rows[..start_idx-1]) } else { String::new() };
-        
-        if col_map.is_empty() { return Err("매핑된 헤더를 찾을 수 없습니다.".to_string()); }
+        for sheet_name in sheet_names {
+            // [CFO Rule] Skip administrative or summary sheets
+            if sheet_name.contains("요약") || sheet_name.contains("안내") || sheet_name.contains("Main") || sheet_name.contains("Summary") || sheet_name.contains("Notice") {
+                continue;
+            }
 
-        for (i, row) in rows.into_iter().skip(start_idx).enumerate() {
-            if let Some(tx) = row_to_tx(&row, &col_map, &global_desc, file_name, i + start_idx + 1) {
-                results.push(tx);
+            if let Ok(range) = excel.worksheet_range(&sheet_name) {
+                println!("[Mapping Engine] Switched to Sheet: {}", sheet_name);
+                let rows: Vec<Vec<String>> = range.rows()
+                     .map(|row| row.iter().map(|c| c.to_string()).map(|s| deep_clean_value(&s)).collect())
+                     .collect();
+                
+                let mut start_idx = 0;
+                let mut col_map = HashMap::new();
+
+                for (i, row) in rows.iter().enumerate().take(100) {
+                     let current_col_map = build_index_map(row, &mapping);
+                     if current_col_map.contains_key("tx_date") && current_col_map.contains_key("amount") {
+                         start_idx = i + 1; 
+                         col_map = current_col_map;
+                         println!("[Mapping Engine] Found Header at Sheet '{}' Row {}: {:?}", sheet_name, i+1, row);
+                         break;
+                     }
+                }
+                
+                if col_map.is_empty() { 
+                    println!("[Mapping Engine] Skip Sheet '{}': No mapping headers found.", sheet_name);
+                    continue; 
+                }
+
+                let global_desc = if start_idx > 0 { extract_global_metadata(&rows[..start_idx-1]) } else { String::new() };
+                
+                for (i, row) in rows.into_iter().skip(start_idx).enumerate() {
+                    if let Some(mut tx) = row_to_tx(&row, &col_map, &global_desc, file_name, i + start_idx + 1) {
+                        tx.audit_trail.push(format!("Imported from Excel Sheet: {}", sheet_name));
+                        // Append sheet-specific metadata to description if it's an installment sheet
+                        if sheet_name.contains("할부") {
+                            tx.description = Some(format!("[할부] {}", tx.description.unwrap_or_default()));
+                        }
+                        results.push(tx);
+                    }
+                }
             }
         }
     } else {
@@ -461,6 +493,9 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
     }
 
     // [Step 3] Card Deep-Dive Extraction
+    let installment_period = col_map.get("installment_period").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
+    let installment_seq = col_map.get("installment_seq").and_then(|&i| row.get(i)).and_then(|s| s.parse::<u32>().ok());
+    
     let principal_amount = col_map.get("principal_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
     let benefit_amount = col_map.get("benefit_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
     let fee_amount = col_map.get("fee_amount").and_then(|&i| row.get(i)).map(|s| sanitize_amount(s));
@@ -483,9 +518,9 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
         }
     }
 
-    if let Some(ba) = billable_amount {
-        if ba != 0.0 && clean_amount == 0.0 {
-            clean_amount = ba;
+    if let Some(ta) = total_amount {
+        if ta != 0.0 && clean_amount == 0.0 {
+            clean_amount = ta;
         }
     }
 
@@ -610,7 +645,9 @@ fn row_to_tx(row: &[String], col_map: &HashMap<String, usize>, global_desc: &str
             format!("[{}] Ingestion: {}", chrono::Local::now().format("%H:%M:%S"), if is_journal_mode { "Journal Import" } else { "Smart Mapping" })
         ],
         id: Some(crate::utils::id_generator::generate_id(&clean_date, crate::utils::id_generator::IdPrefix::AI)),
-        principal_amount: principal_amount.or(Some(total_amount)),
+        installment_period,
+        installment_seq,
+        principal_amount: principal_amount.or(total_amount),
         benefit_amount,
         fee_amount,
         tax_amount,

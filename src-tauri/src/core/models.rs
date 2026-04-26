@@ -131,6 +131,8 @@ pub struct ParsedTransaction {
     pub total_amount: Option<f64>,
     pub row_type: Option<RowType>,
     pub reconciliation_status: Option<String>,
+    #[serde(default)]
+    pub is_vat_explicit: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]

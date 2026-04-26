@@ -6,7 +6,14 @@ export const INSIGHT_UI_MAP: Record<string, any> = {
     bgColor: "bg-rose-500/10",
     borderColor: "border-rose-500/20",
     Icon: AlertTriangle,
-    label: "생존 위기"
+    label: "자금 소진 임박"
+  },
+  WARNING: {
+    color: "text-amber-400",
+    bgColor: "bg-amber-500/10",
+    borderColor: "border-amber-500/20",
+    Icon: Zap,
+    label: "자금 확보 준비"
   },
   J_CURVE: {
     color: "text-blue-400",
@@ -50,13 +57,22 @@ export function generateCFOInsight({ projection, metrics }: { projection: any[],
   const cashTrend = projection.filter(d => d.isFuture).map(m => m.ScenarioCash);
   const profitTrend = projection.filter(d => d.isFuture).map(m => m.ScenarioProfit);
 
-  // 1. 생존 위험 (현금 고갈)
-  if (runway < 6) {
+  // 1. 자금 상태 분석
+  if (runway < 3) {
     return {
       status: "CRITICAL",
-      message: "현금 고갈 위험이 매우 높습니다.",
-      reason: [`Runway < 6개월 (현재 ${runway.toFixed(1)}개월)`],
-      action: ["비용 구조 즉시 재검토", "런웨이 확보를 위한 자금 조달 준비"]
+      message: "60일 이내에 현금이 고갈될 가능성이 매우 높습니다.",
+      reason: [`현금 가용 기간이 3개월 미만입니다 (${runway.toFixed(1)}개월)`],
+      action: ["현금 지출 즉시 동결", "긴급 자금 수혈 방안 실행"]
+    };
+  }
+
+  if (runway < 12) {
+    return {
+      status: "WARNING",
+      message: "내년도 운영을 위한 자금 조달 계획이 필요한 시점입니다.",
+      reason: [`현금 가용 기간이 12개월 미만입니다 (${runway.toFixed(1)}개월)`],
+      action: ["추가 투자 유치(IR) 준비", "다음 분기 예산 최적화", "매출 성장 동력 집중"]
     };
   }
 

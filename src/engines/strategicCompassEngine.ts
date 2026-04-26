@@ -10,7 +10,7 @@ import { sumCashAccounts } from '../core/ssot/cashTruth';
 import { generateMonthlyPnL } from '../core/reporting/generateMonthlyPnL';
 import { generateCashFlow } from '../core/reporting/generateCashFlow';
 import { generateProjectionLedger, buildMetrics } from '../core/ssotEngine';
-import { INSIGHT_UI_MAP } from './cfoInsight';
+import { INSIGHT_UI_MAP, generateCFOInsight } from './cfoInsight';
 
 export interface StrategicEngineInput {
     actualLedger: any[];
@@ -172,35 +172,20 @@ export function runStrategicCompassEngine(input: StrategicEngineInput) {
     });
 
     // 7. Advanced CFO Insight (Scenario Aware)
-    // Mapping internal logic to INSIGHT_UI_MAP keys
-    let insightKey = "STABLE";
-    let customMessage = "현재 수준의 운영 안정성이 유지됩니다.";
+    // 🔥 SSOT: Don't implement logic here. Use the standard cfoInsight generator.
+    const insightData = generateCFOInsight({ 
+        projection: chartData, 
+        metrics: { runwayMonths: runwayValue } 
+    });
 
-    if (runwayValue < 6) {
-        insightKey = "CRITICAL";
-        customMessage = "현금 고갈 위험이 매우 높습니다. 즉각적인 조치가 필요합니다.";
-    } else if (cashOutMonthIdx !== null && runwayValue < 12) {
-        insightKey = "DECLINING";
-        customMessage = "수익성이 지속적으로 악화되는 시나리오입니다. 런웨이 확보가 시급합니다.";
-    } else if (breakEvenMonthIdx !== null && (breakEvenMonthIdx - nowIndexInMetrics) < 24) {
-        insightKey = "J_CURVE";
-        customMessage = "시뮬레이션 기간 내 흑자 전환이 예상됩니다. 성장 동력을 집중 투입하십시오.";
-    } else if (equityControl.controlState === 'CONTROL_LOST' || equityControl.controlState === 'MINORITY_RISK') {
-        insightKey = "CRITICAL";
-        customMessage = "경영권 위기 단계입니다. 추가 지분 희석에 각별한 주의가 필요합니다.";
-    } else if (futureCashDeltas.reduce((a, b) => a + b, 0) > 0) {
-        insightKey = "GROWING";
-        customMessage = "안정적인 수익 성장이 기대되는 전략입니다.";
-    }
-
-    const baseInsight = INSIGHT_UI_MAP[insightKey] || INSIGHT_UI_MAP.STABLE;
-    const insight = {
-        ...baseInsight,
-        message: customMessage,
+    const insight = insightData ? {
+        ...insightData,
         // UI expects bg, border from insight object but INSIGHT_UI_MAP has bgColor, borderColor
-        bg: baseInsight.bgColor,
-        border: baseInsight.borderColor
-    };
+        // The standard map handles this, but we ensure consistency here.
+        bg: (INSIGHT_UI_MAP[insightData.status] as any)?.bgColor,
+        border: (INSIGHT_UI_MAP[insightData.status] as any)?.borderColor,
+        label: (INSIGHT_UI_MAP[insightData.status] as any)?.label
+    } : null;
 
     const stats = {
         cashBalance: ACTUAL_CASH_TRUTH,

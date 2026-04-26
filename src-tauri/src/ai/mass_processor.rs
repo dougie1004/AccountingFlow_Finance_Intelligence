@@ -85,9 +85,12 @@ async fn enhance_transaction_with_ai(
             }
             
             tx.audit_trail.push(format!(
-                "[{}] AI Enhanced via Mass Processing Engine with Tax Auto-Detection",
+                "[{}] AI Enhanced via Mass Processing Engine",
                 chrono::Local::now().format("%H:%M:%S")
             ));
+            
+            // Apply refined VAT logic AFTER AI has suggested an account
+            crate::ai::tax_engine::apply_vat_logic_v2(&mut tx);
             
             Ok(tx)
         }

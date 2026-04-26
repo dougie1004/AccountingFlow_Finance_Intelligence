@@ -561,3 +561,34 @@ Resolve critical simulation timeline bugs, clean up legacy test data, and finali
 *   Refine the "Dunning Email" automation mock for the next presentation.
 
 ---
+
+## 2026-04-26
+
+### 🚀 Financial Intelligence & VAT Compliance Hardening (Phase 15)
+
+**Objective:**
+Elevate the card data recognition engine from a simple classifier to a production-grade CFO Intelligence system by addressing VAT risks, overseas payment nuances, and adding an "Action Layer" for strategic insights.
+
+**Work Items:**
+
+1.  **Intelligent VAT Precision (`excel_parser.rs` & `tax_engine.rs`)**
+    *   **Logic:** Implemented `is_vat_explicit` flag to prioritize original source data. The engine now trusts the Excel VAT column if present, preventing erroneous auto-calculations.
+    *   **Foreign Vendor Guard:** Added a specialized detector for overseas SaaS/Vendors (Amazon, OpenAI, Notion, etc.). These transactions are now forced to **0 VAT** to comply with non-deductibility rules for foreign payments.
+    *   **Category-Aware Auto-Separation:** Refined the 10/110 rule to only apply to domestic transactions in taxable categories (Supplies, Meals, Transit, etc.), strictly exempting Salaries, Insurance, and Taxes per Constitution Article 20.
+
+2.  **Subscription & Pattern Detection (`vendorInsightEngine.ts`)**
+    *   Implemented a deterministic pattern matcher that identifies recurring transactions (same vendor + similar amount + monthly frequency).
+    *   Automatically flags these as 'SUBSCRIPTION' to help users identify and manage recurring fixed costs.
+
+3.  **CFO Action Layer: Vendor Insights (`ManagementInsightPanel.tsx`)**
+    *   **Spending Spike Detection:** Added logic to compare current month spending vs. previous month per vendor. Alerts are generated if a spike (>50%) is detected.
+    *   **Integrated Dashboard Panel:** Created a high-fidelity, animated insight panel using `framer-motion` and `lucide-react`. It provides real-time strategic alerts (Subscriptions, Spikes) directly on the main Command Center.
+
+**Results:**
+*   **Compliance:** Eliminated the "Automatic 10/110" risk for foreign SaaS payments, a major pain point for startup accounting.
+*   **User Value:** Shifted the system from "Just a tool" to a "Strategic CFO" by providing proactive warnings about spending anomalies.
+*   **Deterministic Integrity:** All insights are derived locally from ledger truth, maintaining the "Deterministic Supremacy" required by the Constitution.
+
+**Next Steps:**
+*   Extend the Insight Engine to detect 'New Vendor' entries for first-time audit awareness.
+*   Implement 'Bulk Confirm' for detected subscriptions to streamline month-end closing.

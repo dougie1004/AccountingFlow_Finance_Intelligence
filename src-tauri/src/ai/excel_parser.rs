@@ -60,11 +60,12 @@ pub fn parse_excel_file(bytes: Vec<u8>) -> Result<Vec<ParsedTransaction>, String
         };
 
         let vat_cell = col_map.get("vat").and_then(|&i| row.get(i));
+        let is_vat_explicit = vat_cell.is_some();
         let vat = match vat_cell {
             Some(Data::Float(f)) => *f,
             Some(Data::Int(i)) => *i as f64,
-            Some(Data::String(s)) => s.replace(",", "").replace("₩", "").replace("원", "").trim().parse::<f64>().unwrap_or(amount / 11.0),
-            _ => if is_journal_mode { 0.0 } else { (amount / 11.0).round() },
+            Some(Data::String(s)) => s.replace(",", "").replace("₩", "").replace("원", "").trim().parse::<f64>().unwrap_or(0.0),
+            _ => 0.0,
         };
 
         let entry_type = col_map.get("entry_type").and_then(|&i| row.get(i)).map(|c| c.to_string()).unwrap_or_else(|| "Expense".into());
@@ -90,6 +91,7 @@ pub fn parse_excel_file(bytes: Vec<u8>) -> Result<Vec<ParsedTransaction>, String
             confidence: Some(if is_journal_mode { "High".to_string() } else if amount > 0.0 && !date.is_empty() { "High".to_string() } else { "Normal".to_string() }),
             audit_trail: vec![format!("#1 Excel 지능형 파싱 완료 (Mode: {})", if is_journal_mode { "Journal" } else { "Transaction" })],
             id: Some(crate::utils::id_generator::generate_id(&date, crate::utils::id_generator::IdPrefix::AI)),
+            is_vat_explicit,
             ..Default::default()
         };
 

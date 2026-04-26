@@ -30,6 +30,7 @@ import { SCENARIO_CONFIGS } from '../core/simulation/scenarioConfigs';
 import { resolveARPU, resolveMarketing } from '../core/engine/scenarioResolver';
 import { generateDashboardReport } from '../core/reporting/dashboardReporter';
 import { IntegrityBadge } from '../components/dashboard/IntegrityBadge';
+import { ManagementInsightPanel } from '../components/dashboard/ManagementInsightPanel';
 import { PremiumDatePicker } from '../components/common/PremiumDatePicker';
 
 export const Dashboard = () => {
@@ -314,6 +315,8 @@ export const Dashboard = () => {
                     />
                 </div>
             </div>
+            
+            <ManagementInsightPanel ledger={ledger} systemNow={selectedDate} />
 
             {/* 중단 가로 레이아웃: 추세 그래프 & 시나리오 요약 */}
             <div className="grid grid-cols-1 gap-8">

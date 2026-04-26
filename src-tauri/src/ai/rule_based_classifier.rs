@@ -71,13 +71,30 @@ fn determine_category(vendor: &str, desc: &str, combined: &str) -> ExpenseCatego
     }
 
     // Welfare (Dining/Coffee)
-    if combined.contains("식당") || combined.contains("카페") || combined.contains("스타벅스") || combined.contains("식대") || combined.contains("coffee") {
+    if combined.contains("식당") || combined.contains("카페") || combined.contains("스타벅스") || combined.contains("식대") || combined.contains("coffee") || combined.contains("편의점") || combined.contains("cu") || combined.contains("gs25") {
         return ExpenseCategory::Welfare;
     }
 
-    // Travel
-    if combined.contains("택시") || combined.contains("tx") || combined.contains("srt") || combined.contains("철도") || combined.contains("고속버스") || combined.contains("여비") {
+    // Travel (Enhanced for Korean Public Transport & Tolls)
+    if combined.contains("택시") || combined.contains("tx") || combined.contains("srt") || combined.contains("철도") || combined.contains("고속버스") || combined.contains("여비") 
+       || combined.contains("지하철") || combined.contains("버스") || combined.contains("하이패스") || combined.contains("통행료") || combined.contains("주차") || combined.contains("대리") {
         return ExpenseCategory::Travel;
+    }
+
+    // Utilities & Maintenance (관리비, 통신비)
+    if combined.contains("관리비") || combined.contains("전기료") || combined.contains("수도") || combined.contains("가스") || combined.contains("kt") || combined.contains("skt") || combined.contains("u+") || combined.contains("통신") {
+        return ExpenseCategory::TaxAndPublic;
+    }
+
+    // Office/Consumables
+    if combined.contains("다이소") || combined.contains("알파") || combined.contains("사무") || combined.contains("문구") || combined.contains("복사") || combined.contains("용지") {
+        return ExpenseCategory::Office;
+    }
+
+    // Insurance (보험)
+    if combined.contains("보험") || combined.contains("화재") || combined.contains("해상") || combined.contains("생명") || combined.contains("손해") {
+        // Since Insurance might not be in enum yet (if previous edit failed), use Other or add it
+        return ExpenseCategory::Other; 
     }
 
     ExpenseCategory::Unknown
@@ -113,8 +130,25 @@ fn map_category_to_account(category: ExpenseCategory, vendor: &str, desc: &str) 
         ExpenseCategory::Travel => (
             "여비교통비".to_string(), 
             "High".to_string(), 
-            "Pattern: Transport service detected".to_string()
+            "Pattern: Public Transport/Transit/Toll detected".to_string()
         ),
+        ExpenseCategory::TaxAndPublic => (
+            "세금과공과".to_string(),
+            "High".to_string(),
+            "Pattern: Utilities/Management Fee detected".to_string()
+        ),
+        ExpenseCategory::Office => (
+            "소모품비".to_string(),
+            "High".to_string(),
+            "Pattern: Office supplies/Consumables detected".to_string()
+        ),
+        ExpenseCategory::Other => {
+            if vendor.contains("보험") || vendor.contains("화재") || vendor.contains("생명") {
+                ("보험료".to_string(), "High".to_string(), "Pattern: Identified as Insurance premium".to_string())
+            } else {
+                ("기타비용".to_string(), "Low".to_string(), "Categorized as Other - please verify manually".to_string())
+            }
+        },
         _ => (
             "미분류".to_string(), 
             "Low".to_string(), 
