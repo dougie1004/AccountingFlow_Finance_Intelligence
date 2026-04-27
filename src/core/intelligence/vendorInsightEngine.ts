@@ -1,4 +1,4 @@
-import { JournalEntry } from '../types';
+import { JournalEntry } from '../../types';
 
 export interface VendorInsight {
     vendor: string;

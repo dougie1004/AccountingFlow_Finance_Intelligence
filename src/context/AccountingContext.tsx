@@ -850,7 +850,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                     await writeTextFile('auditflow_v1_ledger.json', JSON.stringify({
                         ledger, partners, assets, inventory, scmOrders, finalizedMonths,
                         timestamp: Date.now()
-                    }), { dir: BaseDirectory.AppData });
+                    }), { baseDir: BaseDirectory.AppData });
                     console.log("[Tauri FS] Ledger state persisted to local disk.");
                 } catch (err) {
                     console.error("[Tauri FS] Persistence failed:", err);
@@ -868,8 +868,8 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
                 try {
                     const { readTextFile, exists, BaseDirectory } = await import('@tauri-apps/plugin-fs');
                     const filePath = 'auditflow_v1_ledger.json';
-                    if (await exists(filePath, { dir: BaseDirectory.AppData })) {
-                        const content = await readTextFile(filePath, { dir: BaseDirectory.AppData });
+                    if (await exists(filePath, { baseDir: BaseDirectory.AppData })) {
+                        const content = await readTextFile(filePath, { baseDir: BaseDirectory.AppData });
                         const parsed = JSON.parse(content);
                         if (parsed.ledger) {
                             setLedger(parsed.ledger);
@@ -1204,18 +1204,7 @@ export const AccountingProvider: React.FC<{ children: ReactNode }> = ({ children
             clearAiMessages,
             quotaStatus,
             refreshQuota,
-            config,
-            updateConfig,
-            partners,
-            addPartner,
-            updatePartner,
-            approvePartner,
-            assets,
-            addAsset,
-            deleteAsset,
-            accounts,
-            addAccount,
-            updateAccount
+            bridgeCardPayments
         }}>
 
             {children}

@@ -35,7 +35,7 @@ const summarizeLedger = (ledger: any[], targetYearMonth?: string) => {
 
     // Monthly-specific aggregation for current month monitoring
     const currentMonthItems: any[] = [];
-    const now = targetYearMonth || "2028-12"; 
+    const now = targetYearMonth || new Date().toISOString().substring(0, 7); 
 
     // Full iteration for totals (crucial for SSOT alignment)
     ledger.forEach(entry => {
@@ -128,9 +128,9 @@ export default function AIAssistant() {
         const actualLedger = context?.ledger || [];
         const scenarioLedger = context?.scenarioResults || [];
         
-        // Target specifically 2028-12 for this context
-        const summary = summarizeLedger(actualLedger, "2028-12");
-        const scenarioSummary = scenarioLedger.length > 0 ? summarizeLedger(scenarioLedger, "2028-12") : null;
+        const currentMonth = context?.selectedDate?.substring(0, 7) || new Date().toISOString().substring(0, 7);
+        const summary = summarizeLedger(actualLedger, currentMonth);
+        const scenarioSummary = scenarioLedger.length > 0 ? summarizeLedger(scenarioLedger, currentMonth) : null;
         
         const financials = context?.financials || { totalAssets: 0, totalLiabilities: 0, netIncome: 0 };
         
@@ -141,12 +141,12 @@ export default function AIAssistant() {
         return `
 [AI_CONTEXT]
 Identity: AccountingFlow AI CFO Assistant (보좌관)
-Current System Time: 2026-03-24 (Analysis focusing on current month Dec 2028 per logs)
+Current System Time: ${new Date().toISOString().substring(0, 10)}
 Primary Data Source: Actual Ledger (확정 장부)
 
 --- ACTUAL DATA (REAL WORLD) ---
 - Period: ${summary.years_range}
-- Current Month (2028-12) Detailed Expenses:
+- Current Month (${currentMonth}) Detailed Expenses:
 ${summary.current_month_detail || "No entries for this month yet."}
 - Total Items: ${summary.transaction_count}
 - Grand Total Revenue/Expense: ${summary.total_revenue.toLocaleString()} / ${summary.total_expense.toLocaleString()} KRW
@@ -154,7 +154,7 @@ ${summary.current_month_detail || "No entries for this month yet."}
 --- SCENARIO DATA (STRATEGIC PROJECTION) ---
 ${scenarioSummary ? `
 - Scenario items detected. Note: These are NOT actual transactions.
-- Scenario 2028-12 Mock Expenses:
+- Scenario ${currentMonth} Mock Expenses:
 ${scenarioSummary.current_month_detail}
 ` : "No active strategic scenario currently mapped."}
 
@@ -163,7 +163,7 @@ ${yearlyBreakdown}
 
 [STRICT GUIDELINE]
 1. If the user asks about "this month" or "current status", ALWAYS analyze the "ACTUAL DATA" first.
-2. If Actual Data for 2028-12 exists, use it as the primary truth. (e.g., Marketing 8,000,000 KRW).
+2. If Actual Data for ${currentMonth} exists, use it as the primary truth.
 3. If the user asks "why is it different?", explain that the actual ledger says X, but your strategic scenario (with multipliers) predicts Y.
 4. DO NOT sum entries from different months when reporting monthly totals.
 `;

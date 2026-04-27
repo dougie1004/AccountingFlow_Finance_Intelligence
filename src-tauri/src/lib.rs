@@ -59,6 +59,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             commands::parse_transaction,
             commands::process_batch,

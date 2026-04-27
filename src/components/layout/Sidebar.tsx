@@ -110,7 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
                     if (data) setProfile(data);
 
                     channel = supabase.channel('realtime-profile')
-                        .on('postgres', { event: '*', schema: 'public', table: 'user_profile', filter: `user_id=eq.${session.user.id}` } as any, (payload: any) => {
+                        .on('postgres_changes', { event: '*', schema: 'public', table: 'user_profile', filter: `user_id=eq.${session.user.id}` } as any, (payload: any) => {
                             setProfile((prev: any) => ({ ...prev, ...payload.new }));
                         }).subscribe();
                 }
@@ -126,11 +126,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setTab }) => {
         const isAdmin = profile?.is_admin === true || String(profile?.is_admin).toLowerCase() === 'true';
         
         // Derived AI limits based on current plan & local context
-        let aiLimit = (profile?.plan === 'pro' || (contextConfig as any).tier === 'Pro') ? 500 : 20; 
+        let aiLimit = (profile?.plan === 'pro' || contextConfig.tier === 'Pro') ? 500 : 20; 
         
         // Quota values - Prefer real-time local gateway data
         const currentUsage = quotaStatus?.daily_units ?? profile?.ai_usage_count ?? 0;
-        const maxLimit = (contextConfig as any).tier === 'Pro' ? 500 : (profile?.plan === 'pro' ? 500 : 20);
+        const maxLimit = contextConfig.tier === 'Pro' ? 500 : (profile?.plan === 'pro' ? 500 : 20);
 
 
         // Trial Expiry Logic

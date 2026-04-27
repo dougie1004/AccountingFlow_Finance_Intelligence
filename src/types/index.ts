@@ -252,6 +252,7 @@ export interface TenantConfig {
     entityMetadata?: EntityMetadata;
     taxPolicy?: TaxPolicy;
     initialBalances?: InitialBalance[]; // 신규 - 기초 잔액
+    tier?: 'Free' | 'Pro'; // NEW - AI 서비스 티어
 }
 
 export interface TaxAdjustment {
@@ -307,7 +308,6 @@ export interface Partner {
     tags?: string[];
     defaultDebitAccount?: string; // AI Learning: User's preferred expense account
     defaultCreditAccount?: string; // AI Learning: User's preferred payment account
-}
 }
 
 export type ParseStatus = 'ok' | 'warning' | 'needConfirm' | 'error';
